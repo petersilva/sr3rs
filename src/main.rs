@@ -9,6 +9,14 @@ use anyhow::Result;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    /// Set log level (debug, info, warn, error)
+    #[arg(long, global = true, alias = "logLevel")]
+    log_level: Option<String>,
+
+    /// Enable debug logging (alias for --log_level debug)
+    #[arg(long, global = true)]
+    debug: bool,
 }
 
 #[derive(Subcommand)]
@@ -35,8 +43,24 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
     let cli = Cli::parse();
+
+    // Initialize logger based on CLI options or environment variable
+    let mut builder = env_logger::Builder::from_default_env();
+    
+    if cli.debug {
+        builder.filter_level(log::LevelFilter::Debug);
+    } else if let Some(level_str) = &cli.log_level {
+        let level = match level_str.to_lowercase().as_str() {
+            "debug" => log::LevelFilter::Debug,
+            "info" => log::LevelFilter::Info,
+            "warn" => log::LevelFilter::Warn,
+            "error" => log::LevelFilter::Error,
+            _ => log::LevelFilter::Info,
+        };
+        builder.filter_level(level);
+    }
+    builder.init();
 
     match cli.command {
         Commands::Show { component, config_file } => {
