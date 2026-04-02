@@ -4,12 +4,13 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use ::log::info;
+use ::log::{info, error, debug};
 
 pub mod subscribe;
 pub mod log;
 
 use crate::flow::log::FlowLog;
+use crate::transfer::get_transfer;
 
 #[derive(Debug, Default)]
 pub struct Worklist {
@@ -47,25 +48,30 @@ pub trait Flow: Send + Sync {
 
         for m in worklist.incoming.drain(..) {
             let url_to_match = format!("{}{}", m.base_url, m.rel_path);
-            let mut matched = false;
-            let mut accepted = config.accept_unmatched;
+            let mut matched_filter = None;
 
             for mask in &config.masks {
                 if mask.matches(&url_to_match) {
-                    matched = true;
-                    accepted = mask.accepting;
+                    matched_filter = Some(mask.clone());
                     break;
                 }
             }
 
-            if matched {
-                if accepted {
-                    filtered_incoming.push(m);
+            if let Some(mask) = matched_filter {
+                let mut msg = m;
+                if mask.accepting {
+                    // Store the matched mask's settings in message fields for the 'work' phase
+                    msg.fields.insert("_dest_dir".to_string(), mask.directory.to_string_lossy().to_string());
+                    msg.fields.insert("_mirror".to_string(), mask.mirror.to_string());
+                    filtered_incoming.push(msg);
                 } else {
-                    worklist.rejected.push(m);
+                    worklist.rejected.push(msg);
                 }
             } else if config.accept_unmatched {
-                filtered_incoming.push(m);
+                let mut msg = m;
+                msg.fields.insert("_dest_dir".to_string(), config.directory.to_string_lossy().to_string());
+                msg.fields.insert("_mirror".to_string(), config.mirror.to_string());
+                filtered_incoming.push(msg);
             } else {
                 worklist.rejected.push(m);
             }
@@ -85,15 +91,67 @@ pub trait Flow: Send + Sync {
     async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     
     async fn work(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        for m in worklist.incoming.drain(..) {
-            println!("WORK: relPath={}", m.rel_path);
-            worklist.ok.push(m);
+        let config = self.config();
+        if !config.download {
+            for m in worklist.incoming.drain(..) {
+                debug!("WORK: download disabled, skipping {}", m.rel_path);
+                worklist.ok.push(m);
+            }
+            return Ok(());
+        }
+
+        for mut m in worklist.incoming.drain(..) {
+            let scheme = match url::Url::parse(&m.base_url) {
+                Ok(u) => u.scheme().to_string(),
+                Err(_) => {
+                    error!("WORK: invalid base_url: {}", m.base_url);
+                    worklist.failed.push(m);
+                    continue;
+                }
+            };
+
+            if let Some(transfer) = get_transfer(&scheme, config) {
+                let dest_dir = m.fields.get("_dest_dir")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| config.directory.clone());
+                
+                let mirror = m.fields.get("_mirror")
+                    .map(|s| s == "true")
+                    .unwrap_or(config.mirror);
+
+                let local_file = if mirror {
+                    dest_dir.join(&m.rel_path)
+                } else {
+                    // Mirror off: just the filename in the destination directory
+                    let filename = std::path::Path::new(&m.rel_path)
+                        .file_name()
+                        .unwrap_or_else(|| std::ffi::OsStr::new("unknown"));
+                    dest_dir.join(filename)
+                };
+
+                match transfer.get(&m, &local_file).await {
+                    Ok(size) => {
+                        info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
+                        m.fields.insert("size".to_string(), size.to_string());
+                        worklist.ok.push(m);
+                    }
+                    Err(e) => {
+                        error!("WORK: download failed for {}: {}", m.rel_path, e);
+                        worklist.failed.push(m);
+                    }
+                }
+            } else {
+                error!("WORK: unsupported protocol: {}", scheme);
+                worklist.failed.push(m);
+            }
         }
         Ok(())
     }
 
     async fn post(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
-    async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()> { 
+        Ok(())
+    }
 
     async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         self.gather(worklist).await?;
@@ -186,13 +244,6 @@ impl Flow for BaseFlow {
 
     async fn gather(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
-    async fn work(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        for m in worklist.incoming.drain(..) {
-            println!("WORK: relPath={}", m.rel_path);
-            worklist.ok.push(m);
-        }
-        Ok(())
-    }
     async fn post(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
 }
@@ -219,8 +270,8 @@ mod tests {
     #[tokio::test]
     async fn test_flow_filter() {
         let mut config = Config::new();
-        config.masks.push(crate::filter::Filter::new(".*accept.*", true).unwrap());
-        config.masks.push(crate::filter::Filter::new(".*reject.*", false).unwrap());
+        config.masks.push(crate::filter::Filter::new(".*accept.*", true, std::path::PathBuf::from("."), false).unwrap());
+        config.masks.push(crate::filter::Filter::new(".*reject.*", false, std::path::PathBuf::from("."), false).unwrap());
         config.accept_unmatched = false;
 
         let flow = BaseFlow::new(config);

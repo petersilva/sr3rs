@@ -3,6 +3,7 @@ pub mod filter;
 pub mod broker;
 pub mod message;
 pub mod flow;
+pub mod transfer;
 
 pub use config::Config;
 pub use message::Message;

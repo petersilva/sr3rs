@@ -43,6 +43,7 @@ pub struct Config {
     pub accept_unmatched: bool,
     pub directory: PathBuf,
     pub download: bool,
+    pub mirror: bool,
     pub instances: u32,
     pub housekeeping: u32, // seconds
     pub log_level: String,
@@ -102,6 +103,7 @@ impl Default for Config {
             accept_unmatched: true,
             directory: PathBuf::from("."),
             download: false,
+            mirror: true, // Default for most components in SR3
             instances: 1,
             housekeeping: 300,
             log_level: "info".to_string(),
@@ -145,12 +147,10 @@ impl Config {
 
     pub fn load(&mut self, path: &str) -> Result<(), ConfigError> {
         let p = Path::new(path);
-        // configname should be the stem (filename without extension)
         if let Some(stem) = p.file_stem() {
             self.configname = Some(stem.to_string_lossy().to_string());
         }
 
-        // Add the directory of the config file to search paths
         if let Some(parent) = p.parent() {
             if !parent.as_os_str().is_empty() {
                 self.config_search_paths.insert(0, parent.to_path_buf());
@@ -171,15 +171,19 @@ impl Config {
                 self.nodupe_ttl = 7 * 3600;
                 self.perm_default = 0o400;
                 self.sleep = 5.0;
+                self.mirror = true;
             }
             "subscribe" => {
                 self.download = true;
+                self.mirror = false; // subscribe defaults to mirror false
             }
             "post" | "watch" => {
                 self.sleep = 5.0;
+                self.mirror = true;
             }
             "winnow" => {
                 self.nodupe_ttl = 300;
+                self.mirror = true;
             }
             _ => {}
         }
@@ -195,7 +199,7 @@ impl Config {
         vars.insert("RAND4".to_string(), self.rand4.clone());
         vars.insert("RAND8".to_string(), self.rand8.clone());
         vars.insert("USER".to_string(), std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
-        vars.insert("HOSTNAME".to_string(), "localhost".to_string()); // FIXME
+        vars.insert("HOSTNAME".to_string(), "localhost".to_string());
 
         for line in content.lines() {
             let line = line.trim();
@@ -240,12 +244,12 @@ impl Config {
                 }
                 "accept" => {
                     if let Some(val) = v {
-                        self.masks.push(Filter::new(val, true)?);
+                        self.masks.push(Filter::new(val, true, self.directory.clone(), self.mirror)?);
                     }
                 }
                 "reject" => {
                     if let Some(val) = v {
-                        self.masks.push(Filter::new(val, false)?);
+                        self.masks.push(Filter::new(val, false, self.directory.clone(), self.mirror)?);
                     }
                 }
                 "directory" => {
@@ -266,6 +270,11 @@ impl Config {
                 "download" => {
                     if let Some(val) = v {
                         self.download = is_true(val);
+                    }
+                }
+                "mirror" => {
+                    if let Some(val) = v {
+                        self.mirror = is_true(val);
                     }
                 }
                 "instances" => {
@@ -408,8 +417,6 @@ impl Config {
 
         let resolved_queue_name = self.resolve_queue_name();
         
-        // Topic prefix logic: if topicPrefix was never set, it defaults to ["v02", "post"] 
-        // in Default::default(), which is correct for SR3.
         let mut full_topic = if topic_override {
             subtopic.to_string()
         } else {
@@ -468,7 +475,6 @@ impl Config {
             publ.base_dir = self.post_base_dir.clone();
             publ.base_url = self.post_base_url.clone();
 
-            // Find existing publisher and update it, or add new one
             if !self.publishers.contains(&publ) {
                 self.publishers.push(publ);
             }
@@ -522,16 +528,16 @@ impl Config {
 
     fn resolve_queue_name(&self) -> String {
         let mut vars = HashMap::new();
-        let broker_user = self.broker.as_ref()
-            .and_then(|b| b.user.clone())
-            .unwrap_or_else(|| "anonymous".to_string());
-        
-        vars.insert("BROKER_USER".to_string(), broker_user);
+        if let Some(broker) = &self.broker {
+            vars.insert("BROKER_USER".to_string(), broker.user.clone().unwrap_or_else(|| "anonymous".to_string()));
+        } else {
+            vars.insert("BROKER_USER".to_string(), "anonymous".to_string());
+        }
         vars.insert("COMPONENT".to_string(), self.component.clone());
         vars.insert("CONFIG".to_string(), self.configname.clone().unwrap_or_else(|| "unknown".to_string()));
         
         let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
-        let hostname = "localhost".to_string(); // FIXME
+        let hostname = "localhost".to_string();
         let queue_share = format!("{}_{}_{}", user, hostname, self.rand8);
         
         vars.insert("QUEUESHARE".to_string(), queue_share);
@@ -560,7 +566,6 @@ impl Config {
         let cred_path = self.get_credential_path();
         let _ = self.credentials.load(&cred_path);
 
-        // Finalize publishers if not already done
         if self.post_broker.is_some() {
             self.parse_publisher();
         }
@@ -658,7 +663,6 @@ fn parse_count(s: &str) -> u32 {
         return s.parse().unwrap_or(0);
     }
     
-    // Check for "kb", "mb", etc.
     if s.ends_with("kb") {
         return (s[..s.len()-2].parse::<f64>().unwrap_or(0.0) * 1024.0) as u32;
     }
@@ -780,7 +784,6 @@ mod tests {
         let sub = &config.subscriptions[0];
         assert_eq!(sub.bindings[0].topic, "v02.post.*.WXO-DD.#");
         assert_eq!(sub.bindings[0].exchange, Some("xs_feeder".to_string()));
-        // Note: queue name will have random part, so we check prefix
         assert!(sub.queue.name.starts_with("q_feeder.flow.test."));
     }
 
