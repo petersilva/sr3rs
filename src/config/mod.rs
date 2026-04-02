@@ -77,10 +77,17 @@ pub struct Config {
 
     pub options: HashMap<String, String>,
     pub config_search_paths: Vec<PathBuf>,
+    pub rand4: String,
+    pub rand8: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let r4: u16 = rng.gen_range(0..0xFFFF);
+        let r8: u32 = rng.gen();
+
         Self {
             appname: "sr3".to_string(),
             component: "flow".to_string(),
@@ -125,6 +132,8 @@ impl Default for Config {
 
             options: HashMap::new(),
             config_search_paths: vec![PathBuf::from(".")],
+            rand4: format!("{:04x}", r4),
+            rand8: format!("{:08x}", r8),
         }
     }
 }
@@ -135,9 +144,14 @@ impl Config {
     }
 
     pub fn load(&mut self, path: &str) -> Result<(), ConfigError> {
-        self.configname = Some(path.to_string());
+        let p = Path::new(path);
+        // configname should be the stem (filename without extension)
+        if let Some(stem) = p.file_stem() {
+            self.configname = Some(stem.to_string_lossy().to_string());
+        }
+
         // Add the directory of the config file to search paths
-        if let Some(parent) = Path::new(path).parent() {
+        if let Some(parent) = p.parent() {
             if !parent.as_os_str().is_empty() {
                 self.config_search_paths.insert(0, parent.to_path_buf());
             }
@@ -178,7 +192,10 @@ impl Config {
         if let Some(cn) = &self.configname {
             vars.insert("CONFIG".to_string(), cn.clone());
         }
-        vars.insert("QUEUESHARE".to_string(), "0".to_string()); // Default
+        vars.insert("RAND4".to_string(), self.rand4.clone());
+        vars.insert("RAND8".to_string(), self.rand8.clone());
+        vars.insert("USER".to_string(), std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
+        vars.insert("HOSTNAME".to_string(), "localhost".to_string()); // FIXME
 
         for line in content.lines() {
             let line = line.trim();
@@ -503,15 +520,23 @@ impl Config {
 
     fn resolve_queue_name(&self) -> String {
         let mut vars = HashMap::new();
-        if let Some(broker) = &self.broker {
-            vars.insert("BROKER_USER".to_string(), broker.user.clone().unwrap_or_else(|| "anonymous".to_string()));
-        } else {
-            vars.insert("BROKER_USER".to_string(), "anonymous".to_string());
-        }
+        let broker_user = self.broker.as_ref()
+            .and_then(|b| b.user.clone())
+            .unwrap_or_else(|| "anonymous".to_string());
+        
+        vars.insert("BROKER_USER".to_string(), broker_user);
         vars.insert("COMPONENT".to_string(), self.component.clone());
         vars.insert("CONFIG".to_string(), self.configname.clone().unwrap_or_else(|| "unknown".to_string()));
-        vars.insert("QUEUESHARE".to_string(), "0".to_string());
-        vars.insert("HOSTNAME".to_string(), "localhost".to_string());
+        
+        let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+        let hostname = "localhost".to_string(); // FIXME
+        let queue_share = format!("{}_{}_{}", user, hostname, self.rand8);
+        
+        vars.insert("QUEUESHARE".to_string(), queue_share);
+        vars.insert("HOSTNAME".to_string(), hostname);
+        vars.insert("USER".to_string(), user);
+        vars.insert("RAND4".to_string(), self.rand4.clone());
+        vars.insert("RAND8".to_string(), self.rand8.clone());
 
         variable_expansion::expand_variables(&self.queue_name, &vars)
     }
@@ -739,7 +764,8 @@ mod tests {
         let sub = &config.subscriptions[0];
         assert_eq!(sub.bindings[0].topic, "v02.post.*.WXO-DD.#");
         assert_eq!(sub.bindings[0].exchange, Some("xs_feeder".to_string()));
-        assert_eq!(sub.queue.name, "q_feeder.flow.test.0");
+        // Note: queue name will have random part, so we check prefix
+        assert!(sub.queue.name.starts_with("q_feeder.flow.test."));
     }
 
     #[test]
