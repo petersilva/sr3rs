@@ -26,7 +26,7 @@ impl SubscribeFlow {
         let broker = self.base.config.broker.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No broker configured"))?;
         
-        let addr = broker.url.to_string();
+        let addr = broker.to_lapin_uri();
         let conn = Connection::connect(&addr, ConnectionProperties::default()).await?;
         let channel = conn.create_channel().await?;
 
@@ -72,6 +72,10 @@ impl SubscribeFlow {
 impl Flow for SubscribeFlow {
     fn config(&self) -> &Config {
         &self.base.config
+    }
+
+    fn logger(&self) -> Arc<Mutex<crate::flow::log::FlowLog>> {
+        self.base.logger.clone()
     }
 
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()> {

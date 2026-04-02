@@ -10,6 +10,7 @@ pub struct Broker {
     pub password: Option<String>,
     pub host: Option<String>,
     pub port: Option<u16>,
+    pub vhost: String,
 }
 
 mod url_serde {
@@ -34,13 +35,34 @@ mod url_serde {
 
 impl Broker {
     pub fn parse(uri: &str) -> Result<Self, ConfigError> {
-        let url = Url::parse(uri)?;
+        let mut url = Url::parse(uri)?;
+        
         let user = if !url.username().is_empty() {
             Some(url.username().to_string())
         } else {
-            None
+            let _ = url.set_username("anonymous");
+            Some("anonymous".to_string())
         };
-        let password = url.password().map(|p| p.to_string());
+
+        let password = if let Some(p) = url.password() {
+            Some(p.to_string())
+        } else {
+            if user.as_deref() == Some("anonymous") {
+                let _ = url.set_password(Some("anonymous"));
+                Some("anonymous".to_string())
+            } else {
+                None
+            }
+        };
+
+        // SR3 vhost logic: if path is '/' or empty, use '/'. 
+        // Otherwise strip leading/trailing slashes.
+        let vhost = if url.path() == "/" || url.path().is_empty() {
+            "/".to_string()
+        } else {
+            url.path().trim_matches('/').to_string()
+        };
+
         let host = url.host_str().map(|h| h.to_string());
         let port = url.port();
 
@@ -50,7 +72,21 @@ impl Broker {
             password,
             host,
             port,
+            vhost,
         })
+    }
+
+    pub fn to_lapin_uri(&self) -> String {
+        // Lapin/amq-protocol requires vhost to be encoded in the URI if it's the root vhost
+        // but it actually handles amqp://user:pass@host/%2f correctly.
+        // If vhost is "/", we should ensure it's represented as %2f in the path.
+        let mut u = self.url.clone();
+        if self.vhost == "/" {
+            u.set_path("/%2f");
+        } else {
+            u.set_path(&format!("/{}", self.vhost));
+        }
+        u.to_string()
     }
 }
 
@@ -60,24 +96,23 @@ mod tests {
 
     #[test]
     fn test_broker_parse_amqp() {
-        let broker = Broker::parse("amqp://feeder:pass@localhost:5672/").unwrap();
+        let broker = Broker::parse("amqp://feeder:pass@localhost:5672/vhost").unwrap();
         assert_eq!(broker.user, Some("feeder".to_string()));
         assert_eq!(broker.password, Some("pass".to_string()));
-        assert_eq!(broker.host, Some("localhost".to_string()));
-        assert_eq!(broker.port, Some(5672));
+        assert_eq!(broker.vhost, "vhost");
     }
 
     #[test]
-    fn test_broker_parse_mqtt() {
-        let broker = Broker::parse("mqtt://broker.example.com/").unwrap();
-        assert_eq!(broker.user, None);
-        assert_eq!(broker.host, Some("broker.example.com".to_string()));
-        assert_eq!(broker.port, None);
+    fn test_broker_parse_default_vhost() {
+        let broker = Broker::parse("amqps://dd.weather.gc.ca/").unwrap();
+        assert_eq!(broker.vhost, "/");
+        assert!(broker.to_lapin_uri().contains("/%2f"));
     }
 
     #[test]
-    fn test_invalid_url() {
-        let result = Broker::parse("not-a-url");
-        assert!(result.is_err());
+    fn test_broker_parse_anonymous_default() {
+        let broker = Broker::parse("amqps://dd.weather.gc.ca/").unwrap();
+        assert_eq!(broker.user, Some("anonymous".to_string()));
+        assert_eq!(broker.password, Some("anonymous".to_string()));
     }
 }

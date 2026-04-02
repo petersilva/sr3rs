@@ -564,9 +564,20 @@ impl Config {
         }
 
         if let Some(broker) = &mut self.broker {
-            if broker.password.is_none() {
+            if broker.user.is_none() || broker.user.as_deref() == Some("anonymous") {
                 if let Some(cred) = self.credentials.get(&broker.url.to_string()) {
+                    let _ = broker.url.set_username(cred.url.username());
+                    let _ = broker.url.set_password(cred.url.password());
+                    broker.user = Some(cred.url.username().to_string());
                     broker.password = cred.url.password().map(String::from);
+                } else if broker.user.is_none() {
+                    let _ = broker.url.set_username("anonymous");
+                    let _ = broker.url.set_password(Some("anonymous"));
+                    broker.user = Some("anonymous".to_string());
+                    broker.password = Some("anonymous".to_string());
+                } else if broker.password.is_none() {
+                    let _ = broker.url.set_password(Some("anonymous"));
+                    broker.password = Some("anonymous".to_string());
                 }
             }
         }
@@ -584,6 +595,9 @@ impl Config {
                 if cred.url.password().is_none() {
                     if let Some(db_cred) = self.credentials.get(&cred.url.to_string()) {
                         let _ = cred.url.set_password(db_cred.url.password());
+                    } else if cred.url.username() == "anonymous" || cred.url.username().is_empty() {
+                        let _ = cred.url.set_username("anonymous");
+                        let _ = cred.url.set_password(Some("anonymous"));
                     }
                 }
             }
