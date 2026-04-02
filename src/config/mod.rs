@@ -408,6 +408,8 @@ impl Config {
 
         let resolved_queue_name = self.resolve_queue_name();
         
+        // Topic prefix logic: if topicPrefix was never set, it defaults to ["v02", "post"] 
+        // in Default::default(), which is correct for SR3.
         let mut full_topic = if topic_override {
             subtopic.to_string()
         } else {

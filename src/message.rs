@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Message {
     pub base_url: String,
     pub rel_path: String,
     pub pub_time: chrono::DateTime<chrono::Utc>,
+    #[serde(flatten)]
     pub fields: HashMap<String, String>,
     #[serde(skip)]
     pub ack_id: Option<u64>,
@@ -20,6 +22,27 @@ impl Message {
             fields: HashMap::new(),
             ack_id: None,
         }
+    }
+
+    pub fn parse_v02_time(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        // v02 time is usually YYYYMMDDHHMMSS.sss
+        if s.len() < 14 { return None; }
+        let year = s[0..4].parse().ok()?;
+        let month = s[4..6].parse().ok()?;
+        let day = s[6..8].parse().ok()?;
+        let hour = s[8..10].parse().ok()?;
+        let min = s[10..12].parse().ok()?;
+        let sec = s[12..14].parse().ok()?;
+        let milli = if s.len() > 15 && s.get(14..15) == Some(".") {
+            s[15..].parse::<u32>().ok().unwrap_or(0)
+        } else {
+            0
+        };
+
+        use chrono::TimeZone;
+        chrono::Utc.with_ymd_and_hms(year, month, day, hour, min, sec)
+            .single()
+            .map(|dt| dt + chrono::Duration::milliseconds(milli as i64))
     }
 }
 
