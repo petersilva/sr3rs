@@ -1,9 +1,7 @@
 use crate::flow::Worklist;
 use crate::Config;
-use crate::message::Message;
 use std::time::Instant;
-use log::{info, debug};
-use chrono::{Utc, DateTime};
+use chrono::Utc;
 
 pub struct FlowLog {
     pub start_time: Instant,
@@ -41,14 +39,14 @@ impl FlowLog {
         self.transfer_count = 0;
     }
 
-    pub fn after_accept(&mut self, config: &Config, worklist: &Worklist) {
+    pub fn after_accept(&mut self, _config: &Config, worklist: &Worklist) {
         self.reject_count += worklist.rejected.len() as u64;
         self.msg_count += worklist.incoming.len() as u64;
         
         let now = Utc::now();
 
         for m in &worklist.rejected {
-            debug!("rejected: {}/{}", m.base_url, m.rel_path);
+            log::debug!("rejected: {}/{}", m.base_url, m.rel_path);
         }
 
         for m in &worklist.incoming {
@@ -57,8 +55,7 @@ impl FlowLog {
             if lag > self.lag_max {
                 self.lag_max = lag;
             }
-            // In SR3, after_accept is a default log event
-            info!("accepted: (lag: {:.2}s) {}/{}", lag, m.base_url, m.rel_path);
+            log::info!("accepted: (lag: {:.2}s) {}/{}", lag, m.base_url, m.rel_path);
         }
     }
 
@@ -70,7 +67,7 @@ impl FlowLog {
                     self.file_bytes += size;
                 }
             }
-            info!("worked ok: {}/{}", m.base_url, m.rel_path);
+            log::info!("worked ok: {}/{}", m.base_url, m.rel_path);
         }
     }
 
@@ -81,14 +78,14 @@ impl FlowLog {
         let apc = if tot > 0 { 100.0 * self.msg_count as f64 / tot as f64 } else { 0.0 };
         let rate = if how_long > 0.0 { self.msg_count as f64 / how_long } else { 0.0 };
 
-        info!("--- Statistics ---");
-        info!("Component: {}, Config: {:?}", config.component, config.configname);
-        info!("Messages received: {}, accepted: {}, rejected: {}", tot, self.msg_count, self.reject_count);
-        info!("Rate accepted: {:.1}% or {:.1} m/s", apc, rate);
-        info!("Files transferred: {}, bytes: {}", self.transfer_count, self.file_bytes);
+        log::info!("--- Statistics ---");
+        log::info!("Component: {}, Config: {:?}", config.component, config.configname);
+        log::info!("Messages received: {}, accepted: {}, rejected: {}", tot, self.msg_count, self.reject_count);
+        log::info!("Rate accepted: {:.1}% or {:.1} m/s", apc, rate);
+        log::info!("Files transferred: {}, bytes: {}", self.transfer_count, self.file_bytes);
         if self.msg_count > 0 {
-            info!("Lag: average: {:.2}s, maximum: {:.2}s", self.lag_total / self.msg_count as f64, self.lag_max);
+            log::info!("Lag: average: {:.2}s, maximum: {:.2}s", self.lag_total / self.msg_count as f64, self.lag_max);
         }
-        info!("------------------");
+        log::info!("------------------");
     }
 }

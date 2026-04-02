@@ -62,12 +62,21 @@ async fn main() -> Result<()> {
             
             config.finalize()?;
 
+            let token = tokio_util::sync::CancellationToken::new();
+            let token_clone = token.clone();
+
+            tokio::spawn(async move {
+                tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl_c");
+                println!("\nCtrl+C received, shutting down gracefully...");
+                token_clone.cancel();
+            });
+
             match component.as_str() {
                 "subscribe" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
                     println!("Connected to broker. Starting flow loop...");
-                    flow.run().await?;
+                    flow.run_with_shutdown(token).await?;
                 }
                 _ => {
                     anyhow::bail!("Unsupported component for run: {}", component);

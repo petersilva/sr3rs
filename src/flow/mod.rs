@@ -3,6 +3,8 @@ use crate::Config;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
+use ::log::info;
 
 pub mod subscribe;
 pub mod log;
@@ -71,7 +73,6 @@ pub trait Flow: Send + Sync {
 
         worklist.incoming = filtered_incoming;
         
-        // Log results of filter/accept
         {
             let logger_arc = self.logger();
             let mut logger = logger_arc.lock().await;
@@ -81,10 +82,18 @@ pub trait Flow: Send + Sync {
         Ok(())
     }
 
-    async fn accept(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
-    async fn work(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
-    async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
-    async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
+    async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    
+    async fn work(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        for m in worklist.incoming.drain(..) {
+            println!("WORK: relPath={}", m.rel_path);
+            worklist.ok.push(m);
+        }
+        Ok(())
+    }
+
+    async fn post(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
 
     async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         self.gather(worklist).await?;
@@ -102,12 +111,26 @@ pub trait Flow: Send + Sync {
     }
 
     async fn run(&self) -> anyhow::Result<()> {
+        let token = CancellationToken::new();
+        self.run_with_shutdown(token).await
+    }
+
+    async fn run_with_shutdown(&self, token: CancellationToken) -> anyhow::Result<()> {
         let mut worklist = Worklist::new();
         let mut last_housekeeping = std::time::Instant::now();
         let housekeeping_interval = std::time::Duration::from_secs(self.config().housekeeping as u64);
 
         loop {
-            self.run_once(&mut worklist).await?;
+            tokio::select! {
+                _ = token.cancelled() => {
+                    info!("Shutdown requested. Finalizing...");
+                    self.housekeeping(&mut worklist).await?;
+                    break;
+                }
+                res = self.run_once(&mut worklist) => {
+                    res?;
+                }
+            }
             
             if last_housekeeping.elapsed() >= housekeeping_interval {
                 self.housekeeping(&mut worklist).await?;
@@ -115,9 +138,17 @@ pub trait Flow: Send + Sync {
             }
 
             if worklist.incoming.is_empty() && worklist.ok.is_empty() {
-                tokio::time::sleep(tokio::time::Duration::from_secs_f64(self.config().sleep)).await;
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        info!("Shutdown requested during sleep. Finalizing...");
+                        self.housekeeping(&mut worklist).await?;
+                        return Ok(());
+                    }
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs_f64(self.config().sleep)) => {}
+                }
             }
         }
+        Ok(())
     }
 
     async fn housekeeping(&self, _worklist: &mut Worklist) -> anyhow::Result<()> {

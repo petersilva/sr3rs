@@ -1,5 +1,5 @@
 use regex::{Regex, Captures};
-use chrono::{Utc, Datelike, Timelike};
+use chrono::Utc;
 use std::collections::HashMap;
 use lazy_static::lazy_static;
 
@@ -57,8 +57,6 @@ mod tests {
     #[test]
     fn test_strftime_expansion() {
         let vars = HashMap::new();
-        let input = "path/%Y/%m/%d"; // Note: Python version uses ${%Y} sometimes
-        // Actually, looking at the python code, it supports ${%Y%m%d}
         let input2 = "path/${%Y-%m}";
         let expanded = expand_variables(input2, &vars);
         let now = Utc::now();
