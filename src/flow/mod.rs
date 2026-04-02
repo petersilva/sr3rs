@@ -81,6 +81,31 @@ pub trait Flow: Send + Sync {
         self.ack(worklist).await?;
         Ok(())
     }
+
+    async fn run(&self) -> anyhow::Result<()> {
+        let mut worklist = Worklist::new();
+        let mut last_housekeeping = std::time::Instant::now();
+        let housekeeping_interval = std::time::Duration::from_secs(self.config().housekeeping as u64);
+
+        loop {
+            self.run_once(&mut worklist).await?;
+            
+            if last_housekeeping.elapsed() >= housekeeping_interval {
+                self.housekeeping(&mut worklist).await?;
+                last_housekeeping = std::time::Instant::now();
+            }
+
+            if worklist.incoming.is_empty() && worklist.ok.is_empty() {
+                tokio::time::sleep(tokio::time::Duration::from_secs_f64(self.config().sleep)).await;
+            }
+            
+            // In a real implementation we'd check for stop signals here
+        }
+    }
+
+    async fn housekeeping(&self, _worklist: &mut Worklist) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 pub struct BaseFlow {
@@ -108,6 +133,7 @@ impl Flow for BaseFlow {
     async fn work(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn post(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    async fn housekeeping(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
 }
 
 #[cfg(test)]

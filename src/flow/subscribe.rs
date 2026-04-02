@@ -27,12 +27,9 @@ impl SubscribeFlow {
             .ok_or_else(|| anyhow::anyhow!("No broker configured"))?;
         
         let addr = broker.url.to_string();
-        // Lapin 2.x doesn't necessarily need an explicit executor for tokio if we don't use tokio-executor-trait
-        // We'll use default properties.
         let conn = Connection::connect(&addr, ConnectionProperties::default()).await?;
         let channel = conn.create_channel().await?;
 
-        // Sarracenia v3 typically declares its own queues
         for sub in &self.base.config.subscriptions {
             channel.queue_declare(
                 &sub.queue.name,
@@ -55,7 +52,6 @@ impl SubscribeFlow {
                 ).await?;
             }
 
-            // For now, we only support one consumer per flow for simplicity
             if self.consumer.is_none() {
                 let consumer = channel.basic_consume(
                     &sub.queue.name,
@@ -82,7 +78,6 @@ impl Flow for SubscribeFlow {
         if let Some(consumer_mutex) = &self.consumer {
             let mut consumer = consumer_mutex.lock().await;
             
-            // Try to gather up to 'batch' messages
             let mut count = 0;
             let batch_size = self.config().batch as usize;
             
@@ -91,13 +86,13 @@ impl Flow for SubscribeFlow {
                     Ok(Some(delivery)) => {
                         let delivery = delivery?;
                         let payload = String::from_utf8_lossy(&delivery.data);
-                        // Parse JSON payload into Message
-                        if let Ok(msg) = serde_json::from_str::<Message>(&payload) {
+                        if let Ok(mut msg) = serde_json::from_str::<Message>(&payload) {
+                            msg.ack_id = Some(delivery.delivery_tag);
                             worklist.incoming.push(msg);
                         }
                         count += 1;
                     }
-                    _ => break, // Timeout or end of stream
+                    _ => break,
                 }
             }
         }
@@ -117,6 +112,34 @@ impl Flow for SubscribeFlow {
     }
 
     async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        self.base.ack(worklist).await
+        if let Some(channel) = &self.channel {
+            // ACK successfully processed messages
+            for m in &worklist.ok {
+                if let Some(tag) = m.ack_id {
+                    channel.basic_ack(tag, BasicAckOptions::default()).await?;
+                }
+            }
+            
+            // ACK rejected messages (SR3 also acks these to remove from queue)
+            for m in &worklist.rejected {
+                if let Some(tag) = m.ack_id {
+                    channel.basic_ack(tag, BasicAckOptions::default()).await?;
+                }
+            }
+
+            // NACK failed messages so they return to queue or are retried
+            for m in &worklist.failed {
+                if let Some(tag) = m.ack_id {
+                    channel.basic_nack(tag, BasicNackOptions { requeue: true, ..Default::default() }).await?;
+                }
+            }
+        }
+
+        worklist.clear();
+        Ok(())
+    }
+
+    async fn housekeeping(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        self.base.housekeeping(worklist).await
     }
 }

@@ -7,6 +7,8 @@ pub struct Message {
     pub rel_path: String,
     pub pub_time: chrono::DateTime<chrono::Utc>,
     pub fields: HashMap<String, String>,
+    #[serde(skip)]
+    pub ack_id: Option<u64>,
 }
 
 impl Message {
@@ -16,6 +18,7 @@ impl Message {
             rel_path: rel_path.to_string(),
             pub_time: chrono::Utc::now(),
             fields: HashMap::new(),
+            ack_id: None,
         }
     }
 }
