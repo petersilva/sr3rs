@@ -249,4 +249,15 @@ impl Flow for SubscribeFlow {
     async fn housekeeping(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         self.base.housekeeping(worklist).await
     }
+
+    async fn shutdown(&self) -> anyhow::Result<()> {
+        log::info!("Shutting down SubscribeFlow: closing {} consumers.", self.consumers.len());
+        for consumer_mutex in &self.consumers {
+            let amqp = consumer_mutex.lock().await;
+            if amqp.channel.status().connected() {
+                let _ = amqp.channel.close(200, "Normal shutdown").await;
+            }
+        }
+        Ok(())
+    }
 }

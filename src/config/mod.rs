@@ -9,6 +9,7 @@ pub mod variable_expansion;
 pub mod credentials;
 pub mod subscription;
 pub mod publisher;
+pub mod paths;
 
 use credentials::{CredentialDb, Credential};
 use subscription::{Subscription, Binding};
@@ -624,13 +625,13 @@ impl Config {
     }
 
     fn get_credential_path(&self) -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let path = PathBuf::from(home).join(".config/sr3rs/credentials.conf");
+        let path = paths::get_user_config_dir().join("credentials.conf");
         if path.exists() {
             return path;
         }
         PathBuf::from("credentials.conf")
     }
+
 }
 
 fn is_true(s: &str) -> bool {

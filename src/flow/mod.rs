@@ -185,6 +185,7 @@ pub trait Flow: Send + Sync {
                 _ = token.cancelled() => {
                     info!("Shutdown requested. Finalizing...");
                     self.housekeeping(&mut worklist).await?;
+                    self.shutdown().await?;
                     break;
                 }
                 res = self.run_once(&mut worklist) => {
@@ -202,6 +203,7 @@ pub trait Flow: Send + Sync {
                     _ = token.cancelled() => {
                         info!("Shutdown requested during sleep. Finalizing...");
                         self.housekeeping(&mut worklist).await?;
+                        self.shutdown().await?;
                         return Ok(());
                     }
                     _ = tokio::time::sleep(tokio::time::Duration::from_secs_f64(self.config().sleep)) => {}
@@ -216,6 +218,10 @@ pub trait Flow: Send + Sync {
         let mut logger = logger_arc.lock().await;
         logger.stats(self.config());
         logger.reset();
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -248,6 +254,7 @@ impl Flow for BaseFlow {
     async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn post(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    async fn shutdown(&self) -> anyhow::Result<()> { Ok(()) }
 }
 
 #[cfg(test)]
