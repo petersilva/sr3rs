@@ -2455,6 +2455,7 @@ dependencies = [
  "humantime",
  "lapin",
  "lazy_static",
+ "libc",
  "log",
  "rand 0.8.5",
  "regex",
