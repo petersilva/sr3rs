@@ -19,6 +19,12 @@ use publisher::Publisher;
 pub enum ConfigError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Parse error in {file}:{line}: {message}")]
+    ParseContext {
+        file: String,
+        line: usize,
+        message: String,
+    },
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("Regex error: {0}")]
@@ -143,7 +149,19 @@ impl Default for Config {
 
 impl Config {
     pub fn new() -> Self {
-        Self::default()
+        let mut cfg = Self::default();
+        let config_dir = paths::get_user_config_dir();
+        
+        // Load admin.conf then default.conf as per SR3
+        for g in ["admin.conf", "default.conf"] {
+            let path = config_dir.join(g);
+            if path.exists() {
+                if let Err(e) = cfg.read_file(path.to_str().unwrap()) {
+                    log::warn!("Failed to load global config {}: {}", path.display(), e);
+                }
+            }
+        }
+        cfg
     }
 
     pub fn load(&mut self, input_path: &str) -> Result<(), ConfigError> {
@@ -166,17 +184,13 @@ impl Config {
     fn resolve_config_path(&self, input: &str) -> Result<PathBuf, ConfigError> {
         let mut try_paths = Vec::new();
         
-        // 1. Try as literal path first
         try_paths.push(PathBuf::from(input));
-        // 2. Try as literal with .conf
         try_paths.push(PathBuf::from(format!("{}.conf", input)));
         
-        // 3. Try relative to ~/.config/sr3rs
         let config_dir = paths::get_user_config_dir();
         try_paths.push(config_dir.join(input));
         try_paths.push(config_dir.join(format!("{}.conf", input)));
 
-        // 4. Try components (e.g. subscribe/dual_amis)
         try_paths.push(config_dir.join(self.component.clone()).join(input));
         try_paths.push(config_dir.join(self.component.clone()).join(format!("{}.conf", input)));
 
@@ -191,7 +205,7 @@ impl Config {
 
     fn read_file(&mut self, path: &str) -> Result<(), ConfigError> {
         let content = std::fs::read_to_string(path).map_err(|_| ConfigError::FileNotFound(path.to_string()))?;
-        self.parse_string(&content)
+        self.parse_string(&content, path)
     }
 
     pub fn apply_component_defaults(&mut self, component: &str) {
@@ -224,7 +238,7 @@ impl Config {
         }
     }
 
-    pub fn parse_string(&mut self, content: &str) -> Result<(), ConfigError> {
+    pub fn parse_string(&mut self, content: &str, filename: &str) -> Result<(), ConfigError> {
         let mut vars = self.options.clone();
         vars.insert("APPNAME".to_string(), self.appname.clone());
         vars.insert("COMPONENT".to_string(), self.component.clone());
@@ -236,7 +250,8 @@ impl Config {
         vars.insert("USER".to_string(), std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
         vars.insert("HOSTNAME".to_string(), "localhost".to_string());
 
-        for line in content.lines() {
+        for (line_no, line) in content.lines().enumerate() {
+            let line_no = line_no + 1;
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
@@ -253,197 +268,274 @@ impl Config {
             }
 
             let k = parts[0];
-            let v = if parts.len() > 1 { Some(parts[1]) } else { None };
+            let v = if parts.len() > 1 {
+                let value_raw = line[parts[0].len()..].trim();
+                let value_expanded = variable_expansion::expand_variables(value_raw, &vars);
+                Some(value_expanded)
+            } else {
+                None
+            };
 
-            match k {
+            if k == "declare" && parts.len() > 2 && parts[1] == "env" {
+                let env_part = parts[2];
+                let kv: Vec<&str> = env_part.splitn(2, '=').collect();
+                if kv.len() == 2 {
+                    let env_k = kv[0];
+                    let env_v = variable_expansion::expand_variables(kv[1], &vars);
+                    std::env::set_var(env_k, &env_v);
+                    vars.insert(env_k.to_string(), env_v);
+                    log::debug!("CONFIG: declared env {}={}", env_k, vars.get(env_k).unwrap());
+                }
+                continue;
+            }
+
+            let result = match k {
                 "broker" => {
-                    if let Some(val) = v {
-                        self.broker = Some(Broker::parse(val)?);
+                    if let Some(ref val) = v {
+                        self.broker = Some(Broker::parse(val).map_err(|e| ConfigError::ParseContext {
+                            file: filename.to_string(),
+                            line: line_no,
+                            message: format!("Broker error: {} (raw: {})", e, val),
+                        })?);
                     }
+                    Ok(())
                 }
                 "exchange" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.exchange = val.to_string();
                     }
+                    Ok(())
                 }
                 "queueName" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.queue_name = val.to_string();
                     }
+                    Ok(())
                 }
                 "subtopic" | "topic" => {
-                    if let Some(val) = v {
-                        self.parse_binding(val, k == "topic")?;
+                    if let Some(ref val) = v {
+                        self.parse_binding(val, k == "topic").map_err(|e| ConfigError::ParseContext {
+                            file: filename.to_string(),
+                            line: line_no,
+                            message: format!("Binding error: {}", e),
+                        })?;
                     }
+                    Ok(())
                 }
                 "topicPrefix" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.topic_prefix = val.split('.').map(|s| s.to_string()).collect();
                     }
+                    Ok(())
                 }
                 "accept" => {
-                    if let Some(val) = v {
-                        self.masks.push(Filter::new(val, true, self.directory.clone(), self.mirror)?);
+                    if let Some(ref val) = v {
+                        self.masks.push(Filter::new(val, true, self.directory.clone(), self.mirror).map_err(|e| ConfigError::ParseContext {
+                            file: filename.to_string(),
+                            line: line_no,
+                            message: format!("Accept error: {}", e),
+                        })?);
                     }
+                    Ok(())
                 }
                 "reject" => {
-                    if let Some(val) = v {
-                        self.masks.push(Filter::new(val, false, self.directory.clone(), self.mirror)?);
+                    if let Some(ref val) = v {
+                        self.masks.push(Filter::new(val, false, self.directory.clone(), self.mirror).map_err(|e| ConfigError::ParseContext {
+                            file: filename.to_string(),
+                            line: line_no,
+                            message: format!("Reject error: {}", e),
+                        })?);
                     }
+                    Ok(())
                 }
                 "directory" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.directory = PathBuf::from(val);
                     }
+                    Ok(())
                 }
                 "acceptUnmatched" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.accept_unmatched = is_true(val);
                     }
+                    Ok(())
                 }
                 "prefetch" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.prefetch = parse_count(val);
                     }
+                    Ok(())
                 }
                 "download" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.download = is_true(val);
                     }
+                    Ok(())
                 }
                 "mirror" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.mirror = is_true(val);
                     }
+                    Ok(())
                 }
                 "instances" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.instances = parse_count(val);
                     }
+                    Ok(())
                 }
                 "housekeeping" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.housekeeping = parse_duration(val);
                     }
+                    Ok(())
                 }
                 "logLevel" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.log_level = val.to_string();
                     }
+                    Ok(())
                 }
                 "include" | "config" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.include_file(val)?;
                     }
+                    Ok(())
                 }
 
-                // Post options
                 "post_broker" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         if self.post_broker.is_some() {
                             self.parse_publisher();
                         }
-                        self.post_broker = Some(Broker::parse(val)?);
+                        self.post_broker = Some(Broker::parse(val).map_err(|e| ConfigError::ParseContext {
+                            file: filename.to_string(),
+                            line: line_no,
+                            message: format!("post_broker error: {} (raw: {})", e, val),
+                        })?);
                     }
+                    Ok(())
                 }
                 "post_exchange" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.post_exchange = Some(val.to_string());
                     }
+                    Ok(())
                 }
                 "post_exchangeSuffix" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.post_exchange_suffix = Some(val.to_string());
                     }
+                    Ok(())
                 }
                 "post_exchangeSplit" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.post_exchange_split = parse_count(val);
                     }
+                    Ok(())
                 }
                 "post_topicPrefix" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.post_topic_prefix = Some(val.split('.').map(|s| s.to_string()).collect());
                     }
+                    Ok(())
                 }
                 "post_format" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.post_format = Some(val.to_string());
                     }
+                    Ok(())
                 }
                 "post_baseDir" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.post_base_dir = Some(PathBuf::from(val));
                     }
+                    Ok(())
                 }
                 "post_baseUrl" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.post_base_url = Some(val.to_string());
                     }
+                    Ok(())
                 }
 
-                // Advanced options
                 "attempts" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.attempts = parse_count(val);
                     }
+                    Ok(())
                 }
                 "batch" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.batch = parse_count(val);
                     }
+                    Ok(())
                 }
                 "delete" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.delete = is_true(val);
                     }
+                    Ok(())
                 }
                 "dry_run" | "simulate" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.dry_run = is_true(val);
                     }
+                    Ok(())
                 }
                 "nodupe_ttl" | "caching" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.nodupe_ttl = parse_duration(val);
                     }
+                    Ok(())
                 }
                 "overwrite" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.overwrite = is_true(val);
                     }
+                    Ok(())
                 }
                 "recursive" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.recursive = is_true(val);
                     }
+                    Ok(())
                 }
                 "timeout" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.timeout = parse_duration(val);
                     }
+                    Ok(())
                 }
                 "sleep" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.sleep = parse_duration(val) as f64;
                     }
+                    Ok(())
                 }
                 "permDefault" | "chmod" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.perm_default = parse_octal(val);
                     }
+                    Ok(())
                 }
                 "permDirDefault" | "chmod_dir" => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.perm_dir_default = parse_octal(val);
                     }
+                    Ok(())
                 }
 
                 _ => {
-                    if let Some(val) = v {
+                    if let Some(ref val) = v {
                         self.options.insert(k.to_string(), val.to_string());
                     }
+                    Ok(())
                 }
+            };
+
+            if let Err(e) = result {
+                return Err(e);
             }
         }
         Ok(())
@@ -613,11 +705,10 @@ impl Config {
         let _ = self.credentials.load(&cred_path);
 
         if self.post_broker.is_some() {
-            // Re-parse post_broker if it contains variables
             let broker_url = self.post_broker.as_ref().unwrap().url.to_string();
             if broker_url.contains('$') {
                 let expanded = variable_expansion::expand_variables(&broker_url, &vars);
-                self.post_broker = Some(Broker::parse(&expanded)?);
+                self.post_broker = Some(Broker::parse(&expanded).map_err(|e| ConfigError::Parse(format!("post_broker finalize error: {}", e)))?);
             }
             self.parse_publisher();
         }
@@ -766,7 +857,7 @@ mod tests {
             directory /data/model_gem_global
             prefetch 25
         ";
-        config.parse_string(content).unwrap();
+        config.parse_string(content, "test.conf").unwrap();
         assert_eq!(config.exchange, "xpublic");
         assert_eq!(config.prefetch, 25);
     }
@@ -802,7 +893,6 @@ mod tests {
         writeln!(inc_file, "prefetch 42").unwrap();
 
         let mut config = Config::new();
-        // Since load now resolves paths, we'll use literal for test
         config.load(main_path.to_str().unwrap()).unwrap();
 
         assert_eq!(config.exchange, "main_ex");
@@ -816,7 +906,7 @@ mod tests {
         let content = "
             directory /data/${APPNAME}/${YYYYMMDD}
         ";
-        config.parse_string(content).unwrap();
+        config.parse_string(content, "test.conf").unwrap();
         let now = chrono::Utc::now();
         let expected = format!("/data/testapp/{}", now.format("%Y%m%d"));
         assert_eq!(config.directory, std::path::PathBuf::from(expected));
@@ -830,7 +920,7 @@ mod tests {
             broker amqp://feeder@localhost/
             topicPrefix v02.post
             subtopic *.WXO-DD.#
-        ").unwrap();
+        ", "test.conf").unwrap();
         
         assert_eq!(config.subscriptions.len(), 1);
         let sub = &config.subscriptions[0];
@@ -846,7 +936,7 @@ mod tests {
             post_broker amqp://feeder@localhost/
             post_exchange xpublic
             post_topicPrefix v02.post
-        ").unwrap();
+        ", "test.conf").unwrap();
         config.finalize().unwrap();
         
         assert_eq!(config.publishers.len(), 1);
