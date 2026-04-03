@@ -90,7 +90,7 @@ impl Default for Config {
         let r8: u32 = rng.gen();
 
         Self {
-            appname: "sr3".to_string(),
+            appname: "sr3rs".to_string(),
             component: "flow".to_string(),
             configname: None,
             broker: None,
@@ -625,7 +625,7 @@ impl Config {
 
     fn get_credential_path(&self) -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let path = PathBuf::from(home).join(".config/sr3/credentials.conf");
+        let path = PathBuf::from(home).join(".config/sr3rs/credentials.conf");
         if path.exists() {
             return path;
         }
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.appname, "sr3");
+        assert_eq!(config.appname, "sr3rs");
         assert_eq!(config.exchange, "xpublic");
     }
 
