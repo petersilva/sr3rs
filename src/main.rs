@@ -52,33 +52,51 @@ enum Commands {
     },
 }
 
+fn setup_logging(level: log::LevelFilter, log_file: Option<PathBuf>) -> Result<()> {
+    let mut dispatch = fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{} [{}] {} {}",
+                chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%Z"),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(level);
+
+    if let Some(path) = log_file {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        dispatch = dispatch.chain(fern::log_file(path)?);
+    } else {
+        dispatch = dispatch.chain(std::io::stderr());
+    }
+
+    dispatch.apply()?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logger based on CLI options or environment variable
-    let mut builder = env_logger::Builder::from_default_env();
-    
     let log_level = if cli.debug {
-        Some("debug".to_string())
+        log::LevelFilter::Debug
     } else {
-        cli.log_level.clone()
-    };
-
-    if let Some(ref level_str) = log_level {
-        let level = match level_str.to_lowercase().as_str() {
+        match cli.log_level.as_deref().unwrap_or("info").to_lowercase().as_str() {
             "debug" => log::LevelFilter::Debug,
             "info" => log::LevelFilter::Info,
             "warn" => log::LevelFilter::Warn,
             "error" => log::LevelFilter::Error,
             _ => log::LevelFilter::Info,
-        };
-        builder.filter_level(level);
-    }
-    builder.init();
+        }
+    };
 
     match cli.command {
         Commands::Show { component, config_file } => {
+            setup_logging(log_level, None)?;
             let mut config = Config::new();
             config.apply_component_defaults(&component);
             
@@ -107,25 +125,14 @@ async fn main() -> Result<()> {
                 let log_file = paths::get_log_filename(&component, config_name.as_deref(), instance);
                 let pid_file = paths::get_pid_filename(&component, config_name.as_deref(), instance);
 
-                println!("Daemonizing... log: {}, pid: {}", log_file.display(), pid_file.display());
+                setup_logging(log_level, Some(log_file.clone()))?;
+                log::info!("Daemon mode active. Logging to {}, PID: {}", log_file.display(), std::process::id());
 
-                // Ensure directories exist
-                if let Some(parent) = log_file.parent() { std::fs::create_dir_all(parent)?; }
                 if let Some(parent) = pid_file.parent() { std::fs::create_dir_all(parent)?; }
-
-                // Basic daemonization (manual for now to avoid extra complex dependencies)
-                // In a production app, use 'daemonize' crate.
-                let stdout = OpenOptions::new().create(true).append(true).open(&log_file)?;
-                let stderr = stdout.try_clone()?;
-
-                // For simplicity, we'll just redirect the current process if we were already 
-                // intended to be backgrounded, but a real daemon would fork.
-                // Redirecting log crate output if using env_logger:
-                // We'd need to re-init logger to file or use a different logger.
-                
-                // Let's just write the PID file
                 let mut f = std::fs::File::create(pid_file)?;
                 write!(f, "{}", std::process::id())?;
+            } else {
+                setup_logging(log_level, None)?;
             }
 
             let token = tokio_util::sync::CancellationToken::new();
