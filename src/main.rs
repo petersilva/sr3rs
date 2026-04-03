@@ -27,43 +27,43 @@ enum Commands {
     /// Show the resolved configuration
     Show {
         /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long, default_value = "flow")]
-        component: String,
+        #[arg(short, long)]
+        component: Option<String>,
 
         /// Path to the configuration file
-        config_file: PathBuf,
+        config_file: String,
     },
     /// Run a flow in the foreground
     Foreground {
         /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long, default_value = "subscribe")]
-        component: String,
+        #[arg(short, long)]
+        component: Option<String>,
 
         /// Path to the configuration file
-        config_file: PathBuf,
+        config_file: String,
     },
     /// Start flow instances as daemons
     Start {
         /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long, default_value = "subscribe")]
-        component: String,
+        #[arg(short, long)]
+        component: Option<String>,
 
         /// Path to the configuration file
-        config_file: PathBuf,
+        config_file: String,
     },
     /// Stop flow instances
     Stop {
         /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long, default_value = "subscribe")]
-        component: String,
+        #[arg(short, long)]
+        component: Option<String>,
 
         /// Path to the configuration file
-        config_file: PathBuf,
+        config_file: String,
     },
     /// Internal command to run a specific daemon instance
     RunInstance {
         component: String,
-        config_file: PathBuf,
+        config_file: String,
         instance: u32,
     }
 }
@@ -94,6 +94,26 @@ fn setup_logging(level: log::LevelFilter, log_file: Option<PathBuf>) -> Result<(
     Ok(())
 }
 
+fn detect_component(component: Option<String>, config_path: &str) -> String {
+    if let Some(c) = component {
+        return c;
+    }
+
+    // Try to extract from path: "subscribe/dual_amis" -> "subscribe"
+    let parts: Vec<&str> = config_path.split('/').collect();
+    if parts.len() > 1 {
+        let first = parts[0];
+        match first {
+            "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" => {
+                return first.to_string();
+            }
+            _ => {}
+        }
+    }
+
+    "subscribe".to_string() // Default fallback
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -112,19 +132,21 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Show { component, config_file } => {
+            let component = detect_component(component, &config_file);
             setup_logging(log_level, None)?;
             let mut config = Config::new();
             config.apply_component_defaults(&component);
-            if let Some(path_str) = config_file.to_str() { config.load(path_str)?; }
+            config.load(&config_file)?;
             config.finalize()?;
             let json = serde_json::to_string_pretty(&config)?;
             println!("{}", json);
         }
         Commands::Foreground { component, config_file } => {
+            let component = detect_component(component, &config_file);
             setup_logging(log_level, None)?;
             let mut config = Config::new();
             config.apply_component_defaults(&component);
-            if let Some(path_str) = config_file.to_str() { config.load(path_str)?; }
+            config.load(&config_file)?;
             config.finalize()?;
 
             let token = tokio_util::sync::CancellationToken::new();
@@ -145,10 +167,11 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Start { component, config_file } => {
+            let component = detect_component(component, &config_file);
             setup_logging(log_level, None)?;
             let mut config = Config::new();
             config.apply_component_defaults(&component);
-            if let Some(path_str) = config_file.to_str() { config.load(path_str)?; }
+            config.load(&config_file)?;
             config.finalize()?;
 
             let num_instances = config.instances;
@@ -169,10 +192,11 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Stop { component, config_file } => {
+            let component = detect_component(component, &config_file);
             setup_logging(log_level, None)?;
             let mut config = Config::new();
             config.apply_component_defaults(&component);
-            if let Some(path_str) = config_file.to_str() { config.load(path_str)?; }
+            config.load(&config_file)?;
             config.finalize()?;
 
             let config_name = config.configname.as_deref();
@@ -182,7 +206,6 @@ async fn main() -> Result<()> {
                     let pid_str = std::fs::read_to_string(&pid_file)?;
                     if let Ok(pid) = pid_str.parse::<i32>() {
                         println!("Stopping instance {} (PID: {})...", i, pid);
-                        // Send SIGTERM
                         unsafe { libc::kill(pid, libc::SIGTERM); }
                     }
                     let _ = std::fs::remove_file(pid_file);
@@ -194,7 +217,7 @@ async fn main() -> Result<()> {
         Commands::RunInstance { component, config_file, instance } => {
             let mut config = Config::new();
             config.apply_component_defaults(&component);
-            if let Some(path_str) = config_file.to_str() { config.load(path_str)?; }
+            config.load(&config_file)?;
             config.finalize()?;
 
             let log_file = paths::get_log_filename(&component, config.configname.as_deref(), instance);
@@ -210,7 +233,6 @@ async fn main() -> Result<()> {
             let token = tokio_util::sync::CancellationToken::new();
             let token_clone = token.clone();
 
-            // Support SIGTERM for graceful shutdown
             let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
             tokio::spawn(async move {
                 tokio::select! {
