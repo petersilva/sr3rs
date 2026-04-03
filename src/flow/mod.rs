@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use ::log::{info, error, debug};
 
 pub mod subscribe;
 pub mod log;
@@ -39,6 +38,7 @@ impl Worklist {
 pub trait Flow: Send + Sync {
     fn config(&self) -> &Config;
     fn logger(&self) -> Arc<Mutex<FlowLog>>;
+    fn publishers(&self) -> Vec<Arc<Mutex<crate::flow::subscribe::AmqpPublisher>>> { Vec::new() }
     
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
     
@@ -60,7 +60,6 @@ pub trait Flow: Send + Sync {
             if let Some(mask) = matched_filter {
                 let mut msg = m;
                 if mask.accepting {
-                    // Store the matched mask's settings in message fields for the 'work' phase
                     msg.fields.insert("_dest_dir".to_string(), mask.directory.to_string_lossy().to_string());
                     msg.fields.insert("_mirror".to_string(), mask.mirror.to_string());
                     filtered_incoming.push(msg);
@@ -94,7 +93,7 @@ pub trait Flow: Send + Sync {
         let config = self.config();
         if !config.download {
             for m in worklist.incoming.drain(..) {
-                debug!("WORK: download disabled, skipping {}", m.rel_path);
+                ::log::debug!("WORK: download disabled, skipping {}", m.rel_path);
                 worklist.ok.push(m);
             }
             return Ok(());
@@ -104,7 +103,7 @@ pub trait Flow: Send + Sync {
             let scheme = match url::Url::parse(&m.base_url) {
                 Ok(u) => u.scheme().to_string(),
                 Err(_) => {
-                    error!("WORK: invalid base_url: {}", m.base_url);
+                    ::log::error!("WORK: invalid base_url: {}", m.base_url);
                     worklist.failed.push(m);
                     continue;
                 }
@@ -124,7 +123,6 @@ pub trait Flow: Send + Sync {
                 let local_file = if mirror {
                     dest_dir.join(rel_path)
                 } else {
-                    // Mirror off: just the filename in the destination directory
                     let filename = std::path::Path::new(rel_path)
                         .file_name()
                         .unwrap_or_else(|| std::ffi::OsStr::new("unknown"));
@@ -133,25 +131,51 @@ pub trait Flow: Send + Sync {
 
                 match transfer.get(&m, &local_file).await {
                     Ok(size) => {
-                        info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
+                        ::log::info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
                         m.fields.insert("size".to_string(), size.to_string());
                         worklist.ok.push(m);
                     }
                     Err(e) => {
-                        error!("WORK: download failed for {}: {}", m.rel_path, e);
+                        ::log::error!("WORK: download failed for {}: {}", m.rel_path, e);
                         worklist.failed.push(m);
                     }
                 }
             } else {
-                error!("WORK: unsupported protocol: {}", scheme);
+                ::log::error!("WORK: unsupported protocol: {}", scheme);
                 worklist.failed.push(m);
             }
         }
         Ok(())
     }
 
-    async fn post(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
-    async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()> { 
+    async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        let publishers = self.publishers();
+        if publishers.is_empty() {
+            return Ok(());
+        }
+
+        let mut next_ok = Vec::new();
+        for m in worklist.ok.drain(..) {
+            let mut failed_indices = Vec::new();
+            for (idx, pub_mutex) in publishers.iter().enumerate() {
+                let p = pub_mutex.lock().await;
+                if let Err(e) = p.publish(&m).await {
+                    ::log::error!("POST: failed to publish to {}: {}", p.broker_url, e);
+                    failed_indices.push(idx);
+                }
+            }
+
+            if failed_indices.is_empty() {
+                next_ok.push(m);
+            } else {
+                worklist.failed.push(m);
+            }
+        }
+        worklist.ok = next_ok;
+        Ok(())
+    }
+
+    async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { 
         Ok(())
     }
 
@@ -183,7 +207,7 @@ pub trait Flow: Send + Sync {
         loop {
             tokio::select! {
                 _ = token.cancelled() => {
-                    info!("Shutdown requested. Finalizing...");
+                    ::log::info!("Shutdown requested. Finalizing...");
                     self.housekeeping(&mut worklist).await?;
                     self.shutdown().await?;
                     break;
@@ -201,7 +225,7 @@ pub trait Flow: Send + Sync {
             if worklist.incoming.is_empty() && worklist.ok.is_empty() {
                 tokio::select! {
                     _ = token.cancelled() => {
-                        info!("Shutdown requested during sleep. Finalizing...");
+                        ::log::info!("Shutdown requested during sleep. Finalizing...");
                         self.housekeeping(&mut worklist).await?;
                         self.shutdown().await?;
                         return Ok(());
@@ -252,7 +276,32 @@ impl Flow for BaseFlow {
 
     async fn gather(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
-    async fn post(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        let publishers = self.publishers();
+        if publishers.is_empty() {
+            return Ok(());
+        }
+
+        let mut next_ok = Vec::new();
+        for m in worklist.ok.drain(..) {
+            let mut failed_indices = Vec::new();
+            for (idx, pub_mutex) in publishers.iter().enumerate() {
+                let p = pub_mutex.lock().await;
+                if let Err(e) = p.publish(&m).await {
+                    ::log::error!("POST: failed to publish to {}: {}", p.broker_url, e);
+                    failed_indices.push(idx);
+                }
+            }
+
+            if failed_indices.is_empty() {
+                next_ok.push(m);
+            } else {
+                worklist.failed.push(m);
+            }
+        }
+        worklist.ok = next_ok;
+        Ok(())
+    }
     async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn shutdown(&self) -> anyhow::Result<()> { Ok(()) }
 }

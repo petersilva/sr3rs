@@ -166,7 +166,7 @@ impl Config {
     fn resolve_config_path(&self, input: &str) -> Result<PathBuf, ConfigError> {
         let mut try_paths = Vec::new();
         
-        // 1. Try as literal path
+        // 1. Try as literal path first
         try_paths.push(PathBuf::from(input));
         // 2. Try as literal with .conf
         try_paths.push(PathBuf::from(format!("{}.conf", input)));
@@ -208,8 +208,13 @@ impl Config {
                 self.mirror = false;
             }
             "post" | "watch" => {
-                self.sleep = 5.0;
+                self.download = false;
                 self.mirror = true;
+                self.sleep = 5.0;
+            }
+            "shovel" => {
+                self.download = false;
+                self.mirror = false;
             }
             "winnow" => {
                 self.nodupe_ttl = 300;

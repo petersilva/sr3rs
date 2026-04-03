@@ -24,6 +24,33 @@ impl Message {
         }
     }
 
+    pub fn from_file(path: &std::path::Path, config: &crate::Config) -> anyhow::Result<Self> {
+        let abs_path = std::fs::canonicalize(path)?;
+        let metadata = std::fs::metadata(&abs_path)?;
+        
+        let base_dir = config.post_base_dir.as_ref()
+            .or(Some(&config.directory))
+            .ok_or_else(|| anyhow::anyhow!("No directory or post_baseDir configured"))?;
+        
+        let abs_base_dir = std::fs::canonicalize(base_dir)?;
+        
+        let rel_path = abs_path.strip_prefix(&abs_base_dir)
+            .map_err(|_| anyhow::anyhow!("File {} is not under base directory {}", abs_path.display(), abs_base_dir.display()))?;
+        
+        let base_url = config.post_base_url.as_deref()
+            .unwrap_or("file://localhost/"); // Fallback
+
+        let mut msg = Self::new(base_url, &rel_path.to_string_lossy());
+        msg.fields.insert("size".to_string(), metadata.len().to_string());
+        
+        if let Ok(mtime) = metadata.modified() {
+            let dt: chrono::DateTime<chrono::Utc> = mtime.into();
+            msg.fields.insert("mtime".to_string(), dt.to_rfc3339());
+        }
+
+        Ok(msg)
+    }
+
     pub fn parse_v02_time(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         // v02 time is usually YYYYMMDDHHMMSS.sss
         if s.len() < 14 { return None; }

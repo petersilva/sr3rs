@@ -2,7 +2,7 @@ use crate::flow::{Flow, Worklist, BaseFlow};
 use crate::Config;
 use crate::message::Message;
 use async_trait::async_trait;
-use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties, Channel, Consumer};
+use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties, Channel, Consumer, BasicProperties};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use futures_util::StreamExt;
@@ -14,9 +14,36 @@ pub struct AmqpConsumer {
     pub subscription_idx: usize,
 }
 
+pub struct AmqpPublisher {
+    pub channel: Channel,
+    pub broker_url: String,
+    pub exchanges: Vec<String>,
+}
+
+impl AmqpPublisher {
+    pub async fn publish(&self, msg: &Message) -> anyhow::Result<()> {
+        let payload = serde_json::to_vec(msg)?;
+        
+        for exchange in &self.exchanges {
+            // Sarracenia v3 uses '.' as separator for AMQP
+            let topic = msg.rel_path.replace('/', "."); 
+            
+            self.channel.basic_publish(
+                exchange,
+                &topic,
+                BasicPublishOptions::default(),
+                &payload,
+                BasicProperties::default().with_content_type("application/json".into()),
+            ).await?;
+        }
+        Ok(())
+    }
+}
+
 pub struct SubscribeFlow {
     pub base: BaseFlow,
     pub consumers: Vec<Arc<Mutex<AmqpConsumer>>>,
+    pub publishers: Vec<Arc<Mutex<AmqpPublisher>>>,
 }
 
 impl SubscribeFlow {
@@ -24,6 +51,7 @@ impl SubscribeFlow {
         Self {
             base: BaseFlow::new(config),
             consumers: Vec::new(),
+            publishers: Vec::new(),
         }
     }
 
@@ -32,6 +60,45 @@ impl SubscribeFlow {
         for idx in 0..subscriptions_count {
             self.connect_subscription(idx).await?;
         }
+
+        let publishers_config = self.base.config.publishers.clone();
+        for p_cfg in publishers_config {
+            let cred = p_cfg.broker.as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Publisher missing broker credentials"))?;
+            
+            let mut broker = crate::broker::Broker::parse(&cred.url.to_string())?;
+            broker.user = Some(cred.url.username().to_string());
+            broker.password = cred.url.password().map(String::from);
+
+            let addr = broker.to_lapin_uri();
+            let mut props = ConnectionProperties::default();
+            let conn_name = format!("sr3rs-pub-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
+            props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
+
+            log::info!("Connecting publisher to broker: {}", addr);
+            let conn = Connection::connect(&addr, props).await?;
+            let channel = conn.create_channel().await?;
+
+            for exchange in &p_cfg.exchange {
+                channel.exchange_declare(
+                    exchange,
+                    lapin::ExchangeKind::Topic,
+                    ExchangeDeclareOptions {
+                        durable: p_cfg.durable,
+                        auto_delete: p_cfg.auto_delete,
+                        ..Default::default()
+                    },
+                    FieldTable::default(),
+                ).await?;
+            }
+
+            self.publishers.push(Arc::new(Mutex::new(AmqpPublisher {
+                channel,
+                broker_url: cred.url.to_string(),
+                exchanges: p_cfg.exchange.clone(),
+            })));
+        }
+
         Ok(())
     }
 
@@ -129,6 +196,10 @@ impl Flow for SubscribeFlow {
         self.base.logger.clone()
     }
 
+    fn publishers(&self) -> Vec<Arc<Mutex<AmqpPublisher>>> {
+        self.publishers.clone()
+    }
+
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let batch_size = self.config().batch as usize;
         let mut total_gathered = 0;
@@ -207,7 +278,8 @@ impl Flow for SubscribeFlow {
     }
 
     async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        self.base.post(worklist).await
+        // Use default Flow::post implementation
+        <dyn Flow>::post(self, worklist).await
     }
 
     async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
@@ -251,9 +323,15 @@ impl Flow for SubscribeFlow {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
-        log::info!("Shutting down SubscribeFlow: closing {} consumers.", self.consumers.len());
+        log::info!("Shutting down SubscribeFlow: closing {} consumers and {} publishers.", self.consumers.len(), self.publishers.len());
         for consumer_mutex in &self.consumers {
             let amqp = consumer_mutex.lock().await;
+            if amqp.channel.status().connected() {
+                let _ = amqp.channel.close(200, "Normal shutdown").await;
+            }
+        }
+        for pub_mutex in &self.publishers {
+            let amqp = pub_mutex.lock().await;
             if amqp.channel.status().connected() {
                 let _ = amqp.channel.close(200, "Normal shutdown").await;
             }

@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
 use sr3rs::Config;
-use sr3rs::flow::{Flow, subscribe::SubscribeFlow};
+use sr3rs::flow::{Flow, subscribe::SubscribeFlow, Worklist};
+use sr3rs::message::Message;
 use sr3rs::config::paths;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use anyhow::Result;
 use std::io::Write;
 use std::process::Command;
@@ -27,48 +28,37 @@ struct Cli {
 enum Commands {
     /// Show the resolved configuration
     Show {
-        /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long)]
-        component: Option<String>,
-
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
     /// Run a flow in the foreground
     Foreground {
-        /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long)]
-        component: Option<String>,
-
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
     /// Start flow instances as daemons
     Start {
-        /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long)]
-        component: Option<String>,
-
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
     /// Stop flow instances
     Stop {
-        /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long)]
-        component: Option<String>,
-
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
     /// Show the status of flow instances
     Status {
-        /// Component name (e.g., subscribe, poll, post)
-        #[arg(short, long)]
-        component: Option<String>,
-
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
+    },
+    /// Post/Announce specific files
+    Post {
+        /// Path or pattern to the configuration file(s)
+        #[arg(short, long)]
+        config: String,
+
+        /// Files to announce
+        files: Vec<String>,
     },
     /// Internal command to run a specific daemon instance
     RunInstance {
@@ -104,11 +94,7 @@ fn setup_logging(level: log::LevelFilter, log_file: Option<PathBuf>) -> Result<(
     Ok(())
 }
 
-fn detect_component(component: Option<String>, config_path: &str) -> String {
-    if let Some(c) = component {
-        return c;
-    }
-
+fn detect_component(config_path: &str) -> String {
     let config_dir = paths::get_user_config_dir();
     let path = std::path::Path::new(config_path);
     
@@ -137,7 +123,7 @@ fn detect_component(component: Option<String>, config_path: &str) -> String {
         }
     }
 
-    "subscribe".to_string()
+    "subscribe".to_string() // Default fallback
 }
 
 fn is_process_running(pid: i32) -> bool {
@@ -209,11 +195,11 @@ async fn main() -> Result<()> {
     };
 
     match cli.command {
-        Commands::Show { component, config_pattern } => {
+        Commands::Show { config_pattern } => {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
             for config_file in configs {
-                let component = detect_component(component.clone(), &config_file);
+                let component = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&component);
                 config.load(&config_file)?;
@@ -222,7 +208,7 @@ async fn main() -> Result<()> {
                 println!("--- Configuration: {} ---\n{}\n", config_file, json);
             }
         }
-        Commands::Foreground { component, config_pattern } => {
+        Commands::Foreground { config_pattern } => {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
             if configs.len() > 1 {
@@ -233,7 +219,7 @@ async fn main() -> Result<()> {
             }
             
             let config_file = &configs[0];
-            let component = detect_component(component, config_file);
+            let component = detect_component(config_file);
             let mut config = Config::new();
             config.apply_component_defaults(&component);
             config.load(config_file)?;
@@ -248,7 +234,7 @@ async fn main() -> Result<()> {
             });
 
             match component.as_str() {
-                "subscribe" => {
+                "subscribe" | "shovel" | "post" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
                     flow.run_with_shutdown(token).await?;
@@ -256,13 +242,13 @@ async fn main() -> Result<()> {
                 _ => anyhow::bail!("Unsupported component: {}", component),
             }
         }
-        Commands::Start { component, config_pattern } => {
+        Commands::Start { config_pattern } => {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
             let exe = std::env::current_exe()?;
 
             for config_file in configs {
-                let comp = detect_component(component.clone(), &config_file);
+                let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
                 config.load(&config_file)?;
@@ -295,12 +281,12 @@ async fn main() -> Result<()> {
                 println!("Started {} instance(s) of {} as daemons.", num_instances, config_file);
             }
         }
-        Commands::Stop { component, config_pattern } => {
+        Commands::Stop { config_pattern } => {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
 
             for config_file in configs {
-                let comp = detect_component(component.clone(), &config_file);
+                let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
                 if let Err(_) = config.load(&config_file) { continue; }
@@ -330,7 +316,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Status { component, config_pattern } => {
+        Commands::Status { config_pattern } => {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
 
@@ -338,7 +324,7 @@ async fn main() -> Result<()> {
             println!("{:<25} {:<10} {:<10}", "----------------", "-----", "---------");
 
             for config_file in configs {
-                let comp = detect_component(component.clone(), &config_file);
+                let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
                 if let Err(_) = config.load(&config_file) { continue; }
@@ -376,6 +362,38 @@ async fn main() -> Result<()> {
             }
             println!();
         }
+        Commands::Post { config, files } => {
+            setup_logging(log_level, None)?;
+            let configs = resolve_patterns(Some(config));
+            
+            for config_file in configs {
+                let comp = detect_component(&config_file);
+                let mut config_obj = Config::new();
+                config_obj.apply_component_defaults(&comp);
+                config_obj.load(&config_file)?;
+                config_obj.finalize()?;
+
+                let mut flow = SubscribeFlow::new(config_obj);
+                flow.connect().await?;
+
+                let mut worklist = Worklist::new();
+                for file_path in &files {
+                    match Message::from_file(Path::new(file_path), flow.config()) {
+                        Ok(msg) => {
+                            log::info!("Queuing notification for: {}", file_path);
+                            worklist.ok.push(msg);
+                        }
+                        Err(e) => log::error!("Failed to build message for {}: {}", file_path, e),
+                    }
+                }
+
+                if !worklist.ok.is_empty() {
+                    flow.post(&mut worklist).await?;
+                    log::info!("Successfully announced {} files using {}.", worklist.ok.len(), config_file);
+                }
+                flow.shutdown().await?;
+            }
+        }
         Commands::RunInstance { component, config_file, instance } => {
             let mut config = Config::new();
             config.apply_component_defaults(&component);
@@ -406,7 +424,7 @@ async fn main() -> Result<()> {
             });
 
             let res = match component.as_str() {
-                "subscribe" => {
+                "subscribe" | "shovel" | "post" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
                     flow.run_with_shutdown(token).await

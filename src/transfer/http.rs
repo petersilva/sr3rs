@@ -23,7 +23,7 @@ impl Transfer for HttpTransfer {
         let url = format!("{}{}", msg.base_url, msg.rel_path);
         log::debug!("HTTP GET: {}", url);
 
-        let mut response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url).send().await?;
         if !response.status().is_success() {
             anyhow::bail!("HTTP request failed with status: {}", response.status());
         }
