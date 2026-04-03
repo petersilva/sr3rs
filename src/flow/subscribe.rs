@@ -277,11 +277,6 @@ impl Flow for SubscribeFlow {
         self.base.work(worklist).await
     }
 
-    async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        // Use default Flow::post implementation
-        <dyn Flow>::post(self, worklist).await
-    }
-
     async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         for consumer_mutex in &self.consumers {
             let amqp = consumer_mutex.lock().await;

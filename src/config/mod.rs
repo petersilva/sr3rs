@@ -243,6 +243,10 @@ impl Config {
             }
 
             let expanded_line = variable_expansion::expand_variables(line, &vars);
+            if expanded_line != line {
+                log::debug!("CONFIG: expanded '{}' to '{}'", line, expanded_line);
+            }
+
             let parts: Vec<&str> = expanded_line.split_whitespace().collect();
             if parts.is_empty() {
                 continue;
@@ -598,10 +602,23 @@ impl Config {
     }
 
     pub fn finalize(&mut self) -> Result<(), ConfigError> {
+        let mut vars = self.options.clone();
+        vars.insert("APPNAME".to_string(), self.appname.clone());
+        vars.insert("COMPONENT".to_string(), self.component.clone());
+        if let Some(cn) = &self.configname {
+            vars.insert("CONFIG".to_string(), cn.clone());
+        }
+
         let cred_path = self.get_credential_path();
         let _ = self.credentials.load(&cred_path);
 
         if self.post_broker.is_some() {
+            // Re-parse post_broker if it contains variables
+            let broker_url = self.post_broker.as_ref().unwrap().url.to_string();
+            if broker_url.contains('$') {
+                let expanded = variable_expansion::expand_variables(&broker_url, &vars);
+                self.post_broker = Some(Broker::parse(&expanded)?);
+            }
             self.parse_publisher();
         }
 

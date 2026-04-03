@@ -28,8 +28,16 @@ pub fn expand_variables(text: &str, vars: &HashMap<String, String>) -> String {
             "HH" => now.format("%H").to_string(),
             "JJJ" => now.format("%j").to_string(),
             _ => {
-                // Look up in provided variables
-                vars.get(var).cloned().unwrap_or_else(|| caps[0].to_string())
+                // 1. Look up in provided variables
+                if let Some(val) = vars.get(var) {
+                    return val.clone();
+                }
+                // 2. Look up in environment variables
+                if let Ok(val) = std::env::var(var) {
+                    return val;
+                }
+                // 3. Fallback to original string
+                caps[0].to_string()
             }
         }
     });
@@ -62,5 +70,15 @@ mod tests {
         let now = Utc::now();
         let expected = format!("path/{}", now.format("%Y-%m"));
         assert_eq!(expanded, expected);
+    }
+
+    #[test]
+    fn test_env_expansion() {
+        std::env::set_var("TEST_VAR", "env_value");
+        let vars = HashMap::new();
+        let input = "val=${TEST_VAR}";
+        let expanded = expand_variables(input, &vars);
+        assert_eq!(expanded, "val=env_value");
+        std::env::remove_var("TEST_VAR");
     }
 }

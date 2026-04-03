@@ -276,34 +276,7 @@ impl Flow for BaseFlow {
 
     async fn gather(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
-    async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        let publishers = self.publishers();
-        if publishers.is_empty() {
-            return Ok(());
-        }
-
-        let mut next_ok = Vec::new();
-        for m in worklist.ok.drain(..) {
-            let mut failed_indices = Vec::new();
-            for (idx, pub_mutex) in publishers.iter().enumerate() {
-                let p = pub_mutex.lock().await;
-                if let Err(e) = p.publish(&m).await {
-                    ::log::error!("POST: failed to publish to {}: {}", p.broker_url, e);
-                    failed_indices.push(idx);
-                }
-            }
-
-            if failed_indices.is_empty() {
-                next_ok.push(m);
-            } else {
-                worklist.failed.push(m);
-            }
-        }
-        worklist.ok = next_ok;
-        Ok(())
-    }
     async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
-    async fn shutdown(&self) -> anyhow::Result<()> { Ok(()) }
 }
 
 #[cfg(test)]
