@@ -119,11 +119,13 @@ pub trait Flow: Send + Sync {
                     .map(|s| s == "true")
                     .unwrap_or(config.mirror);
 
+                let rel_path = m.rel_path.trim_start_matches('/');
+
                 let local_file = if mirror {
-                    dest_dir.join(&m.rel_path)
+                    dest_dir.join(rel_path)
                 } else {
                     // Mirror off: just the filename in the destination directory
-                    let filename = std::path::Path::new(&m.rel_path)
+                    let filename = std::path::Path::new(rel_path)
                         .file_name()
                         .unwrap_or_else(|| std::ffi::OsStr::new("unknown"));
                     dest_dir.join(filename)

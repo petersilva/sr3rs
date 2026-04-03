@@ -175,7 +175,7 @@ impl Config {
             }
             "subscribe" => {
                 self.download = true;
-                self.mirror = false; // subscribe defaults to mirror false
+                self.mirror = false;
             }
             "post" | "watch" => {
                 self.sleep = 5.0;

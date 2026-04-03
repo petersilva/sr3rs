@@ -11,6 +11,7 @@ pub struct AmqpConsumer {
     pub channel: Channel,
     pub consumer: Consumer,
     pub broker_url: String,
+    pub subscription_idx: usize,
 }
 
 pub struct SubscribeFlow {
@@ -27,61 +28,91 @@ impl SubscribeFlow {
     }
 
     pub async fn connect(&mut self) -> anyhow::Result<()> {
-        // In SR3, each subscription can have its own broker
-        for sub in &self.base.config.subscriptions {
-            let cred = sub.broker.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Subscription missing broker credentials"))?;
-            
-            let mut broker = crate::broker::Broker::parse(&cred.url.to_string())?;
-            broker.user = Some(cred.url.username().to_string());
-            broker.password = cred.url.password().map(String::from);
+        let subscriptions_count = self.base.config.subscriptions.len();
+        for idx in 0..subscriptions_count {
+            self.connect_subscription(idx).await?;
+        }
+        Ok(())
+    }
 
-            let addr = broker.to_lapin_uri();
-            
-            let mut props = ConnectionProperties::default();
-            let conn_name = format!("sr3rs-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
-            props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
+    async fn connect_subscription(&mut self, idx: usize) -> anyhow::Result<()> {
+        let sub = &self.base.config.subscriptions[idx];
+        let cred = sub.broker.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Subscription {} missing broker credentials", idx))?;
+        
+        let mut broker = crate::broker::Broker::parse(&cred.url.to_string())?;
+        broker.user = Some(cred.url.username().to_string());
+        broker.password = cred.url.password().map(String::from);
 
-            log::info!("Connecting to broker: {}", addr);
-            let conn = Connection::connect(&addr, props).await?;
-            let channel = conn.create_channel().await?;
+        let addr = broker.to_lapin_uri();
+        
+        let mut props = ConnectionProperties::default();
+        let conn_name = format!("sr3rs-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
+        props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
 
-            log::debug!("Declaring queue: {}", sub.queue.name);
-            channel.queue_declare(
-                &sub.queue.name,
-                QueueDeclareOptions {
-                    durable: sub.queue.durable,
-                    auto_delete: sub.queue.auto_delete,
-                    ..Default::default()
-                },
-                FieldTable::default(),
-            ).await?;
-
-            for binding in &sub.bindings {
-                let exchange = binding.exchange.as_deref().unwrap_or("xpublic");
-                log::info!("Binding queue {} to exchange {} with topic {}", sub.queue.name, exchange, binding.topic);
-                channel.queue_bind(
-                    &sub.queue.name,
-                    exchange,
-                    &binding.topic,
-                    QueueBindOptions::default(),
-                    FieldTable::default(),
-                ).await?;
+        log::info!("Connecting to broker: {}", addr);
+        
+        let mut retry_count = 0;
+        let max_retries = 10;
+        let conn = loop {
+            match Connection::connect(&addr, props.clone()).await {
+                Ok(c) => break c,
+                Err(e) => {
+                    retry_count += 1;
+                    if retry_count > max_retries {
+                        anyhow::bail!("Failed to connect to broker {} after {} attempts: {}", addr, max_retries, e);
+                    }
+                    let delay = std::cmp::min(2u64.pow(retry_count), 30);
+                    log::warn!("Connection failed: {}. Retrying in {} seconds...", e, delay);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
+                }
             }
+        };
 
-            log::info!("Starting consumer on queue: {}", sub.queue.name);
-            let consumer = channel.basic_consume(
+        let channel = conn.create_channel().await?;
+
+        log::debug!("Declaring queue: {}", sub.queue.name);
+        channel.queue_declare(
+            &sub.queue.name,
+            QueueDeclareOptions {
+                durable: sub.queue.durable,
+                auto_delete: sub.queue.auto_delete,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        ).await?;
+
+        for binding in &sub.bindings {
+            let exchange = binding.exchange.as_deref().unwrap_or("xpublic");
+            log::info!("Binding queue {} to exchange {} with topic {}", sub.queue.name, exchange, binding.topic);
+            channel.queue_bind(
                 &sub.queue.name,
-                "sr3rs_consumer",
-                BasicConsumeOptions::default(),
+                exchange,
+                &binding.topic,
+                QueueBindOptions::default(),
                 FieldTable::default(),
             ).await?;
+        }
 
-            self.consumers.push(Arc::new(Mutex::new(AmqpConsumer {
-                channel,
-                consumer,
-                broker_url: cred.url.to_string(),
-            })));
+        log::info!("Starting consumer on queue: {}", sub.queue.name);
+        let consumer = channel.basic_consume(
+            &sub.queue.name,
+            "sr3rs_consumer",
+            BasicConsumeOptions::default(),
+            FieldTable::default(),
+        ).await?;
+
+        let new_consumer = Arc::new(Mutex::new(AmqpConsumer {
+            channel,
+            consumer,
+            broker_url: cred.url.to_string(),
+            subscription_idx: idx,
+        }));
+
+        if idx < self.consumers.len() {
+            self.consumers[idx] = new_consumer;
+        } else {
+            self.consumers.push(new_consumer);
         }
 
         Ok(())
@@ -104,55 +135,63 @@ impl Flow for SubscribeFlow {
 
         for consumer_mutex in &self.consumers {
             let mut amqp = consumer_mutex.lock().await;
-            let mut count = 0;
             
+            if !amqp.channel.status().connected() {
+                log::warn!("Channel for {} is disconnected. Reconnect should be triggered.", amqp.broker_url);
+                continue;
+            }
+
+            let mut count = 0;
             while total_gathered < batch_size && count < (batch_size / self.consumers.len()).max(1) {
-                // Wait up to 500ms for a message to arrive if we haven't found any yet
                 let wait_time = if total_gathered == 0 { 500 } else { 50 };
                 
                 match tokio::time::timeout(tokio::time::Duration::from_millis(wait_time), amqp.consumer.next()).await {
                     Ok(Some(delivery)) => {
-                        let delivery = delivery?;
-                        let payload = String::from_utf8_lossy(&delivery.data);
-                        log::debug!("GATHER: received raw payload from {}: {}", amqp.broker_url, payload);
-                        
-                        let mut parsed_msg = None;
-                        if payload.starts_with('{') {
-                            match serde_json::from_str::<Message>(&payload) {
-                                Ok(msg) => parsed_msg = Some(msg),
-                                Err(e) => log::error!("GATHER: failed to parse v03 JSON message: {}. Payload: {}", e, payload),
-                            }
-                        } else {
-                            let parts: Vec<&str> = payload.split_whitespace().collect();
-                            if parts.len() >= 3 {
-                                let pub_time = Message::parse_v02_time(parts[0]).unwrap_or_else(chrono::Utc::now);
-                                let base_url = parts[1].replace("%20", " ").replace("%23", "#");
-                                let rel_path = parts[2].to_string();
-                                let mut msg = Message::new(&base_url, &rel_path);
-                                msg.pub_time = pub_time;
-                                parsed_msg = Some(msg);
-                            } else {
-                                log::error!("GATHER: unknown message format from {}: {}", amqp.broker_url, payload);
-                            }
-                        }
+                        match delivery {
+                            Ok(delivery) => {
+                                let payload = String::from_utf8_lossy(&delivery.data);
+                                log::debug!("GATHER: received raw payload from {}: {}", amqp.broker_url, payload);
+                                
+                                let mut parsed_msg = None;
+                                if payload.starts_with('{') {
+                                    match serde_json::from_str::<Message>(&payload) {
+                                        Ok(msg) => parsed_msg = Some(msg),
+                                        Err(e) => log::error!("GATHER: failed to parse v03 JSON message: {}. Payload: {}", e, payload),
+                                    }
+                                } else {
+                                    let parts: Vec<&str> = payload.split_whitespace().collect();
+                                    if parts.len() >= 3 {
+                                        let pub_time = Message::parse_v02_time(parts[0]).unwrap_or_else(chrono::Utc::now);
+                                        let base_url = parts[1].replace("%20", " ").replace("%23", "#");
+                                        let rel_path = parts[2].to_string();
+                                        let mut msg = Message::new(&base_url, &rel_path);
+                                        msg.pub_time = pub_time;
+                                        parsed_msg = Some(msg);
+                                    } else {
+                                        log::error!("GATHER: unknown message format from {}: {}", amqp.broker_url, payload);
+                                    }
+                                }
 
-                        if let Some(mut msg) = parsed_msg {
-                            msg.ack_id = Some(delivery.delivery_tag);
-                            // Store which consumer this message came from so we can ACK on the right channel
-                            msg.fields.insert("_consumer_idx".to_string(), self.consumers.iter().position(|c| Arc::ptr_eq(c, consumer_mutex)).unwrap().to_string());
-                            worklist.incoming.push(msg);
+                                if let Some(mut msg) = parsed_msg {
+                                    msg.ack_id = Some(delivery.delivery_tag);
+                                    msg.fields.insert("_consumer_idx".to_string(), amqp.subscription_idx.to_string());
+                                    worklist.incoming.push(msg);
+                                }
+                                count += 1;
+                                total_gathered += 1;
+                            }
+                            Err(e) => {
+                                log::error!("GATHER: delivery error from {}: {}", amqp.broker_url, e);
+                                break;
+                            }
                         }
-                        count += 1;
-                        total_gathered += 1;
                     }
                     _ => break,
                 }
             }
         }
 
-        if total_gathered == 0 {
-            log::debug!("GATHER: no messages received in this cycle.");
-        } else {
+        if total_gathered > 0 {
             log::info!("GATHER: received {} messages.", total_gathered);
         }
 
@@ -172,15 +211,16 @@ impl Flow for SubscribeFlow {
     }
 
     async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        // Process messages by consumer index to use the correct channel
-        for (idx, consumer_mutex) in self.consumers.iter().enumerate() {
+        for consumer_mutex in &self.consumers {
             let amqp = consumer_mutex.lock().await;
-            let idx_str = idx.to_string();
+            if !amqp.channel.status().connected() { continue; }
+            
+            let idx_str = amqp.subscription_idx.to_string();
 
             for m in &worklist.ok {
                 if m.fields.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(tag) = m.ack_id {
-                        amqp.channel.basic_ack(tag, BasicAckOptions::default()).await?;
+                        let _ = amqp.channel.basic_ack(tag, BasicAckOptions::default()).await;
                     }
                 }
             }
@@ -188,7 +228,7 @@ impl Flow for SubscribeFlow {
             for m in &worklist.rejected {
                 if m.fields.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(tag) = m.ack_id {
-                        amqp.channel.basic_ack(tag, BasicAckOptions::default()).await?;
+                        let _ = amqp.channel.basic_ack(tag, BasicAckOptions::default()).await;
                     }
                 }
             }
@@ -196,7 +236,7 @@ impl Flow for SubscribeFlow {
             for m in &worklist.failed {
                 if m.fields.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(tag) = m.ack_id {
-                        amqp.channel.basic_nack(tag, BasicNackOptions { requeue: true, ..Default::default() }).await?;
+                        let _ = amqp.channel.basic_nack(tag, BasicNackOptions { requeue: true, ..Default::default() }).await;
                     }
                 }
             }
