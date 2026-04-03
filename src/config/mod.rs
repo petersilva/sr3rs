@@ -91,7 +91,7 @@ impl Default for Config {
         let r8: u32 = rng.gen();
 
         Self {
-            appname: "sr3rs".to_string(),
+            appname: "sr3".to_string(),
             component: "flow".to_string(),
             configname: None,
             broker: None,
@@ -146,18 +146,47 @@ impl Config {
         Self::default()
     }
 
-    pub fn load(&mut self, path: &str) -> Result<(), ConfigError> {
-        let p = Path::new(path);
-        if let Some(stem) = p.file_stem() {
+    pub fn load(&mut self, input_path: &str) -> Result<(), ConfigError> {
+        let path = self.resolve_config_path(input_path)?;
+        
+        // configname should be the stem (filename without extension)
+        if let Some(stem) = path.file_stem() {
             self.configname = Some(stem.to_string_lossy().to_string());
         }
 
-        if let Some(parent) = p.parent() {
+        // Add the directory of the config file to search paths for includes
+        if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 self.config_search_paths.insert(0, parent.to_path_buf());
             }
         }
-        self.read_file(path)
+        self.read_file(path.to_str().unwrap())
+    }
+
+    fn resolve_config_path(&self, input: &str) -> Result<PathBuf, ConfigError> {
+        let mut try_paths = Vec::new();
+        
+        // 1. Try as literal path
+        try_paths.push(PathBuf::from(input));
+        // 2. Try as literal with .conf
+        try_paths.push(PathBuf::from(format!("{}.conf", input)));
+        
+        // 3. Try relative to ~/.config/sr3rs
+        let config_dir = paths::get_user_config_dir();
+        try_paths.push(config_dir.join(input));
+        try_paths.push(config_dir.join(format!("{}.conf", input)));
+
+        // 4. Try components (e.g. subscribe/dual_amis)
+        try_paths.push(config_dir.join(self.component.clone()).join(input));
+        try_paths.push(config_dir.join(self.component.clone()).join(format!("{}.conf", input)));
+
+        for p in try_paths {
+            if p.exists() && p.is_file() {
+                return Ok(p);
+            }
+        }
+
+        Err(ConfigError::FileNotFound(input.to_string()))
     }
 
     fn read_file(&mut self, path: &str) -> Result<(), ConfigError> {
@@ -631,7 +660,6 @@ impl Config {
         }
         PathBuf::from("credentials.conf")
     }
-
 }
 
 fn is_true(s: &str) -> bool {
@@ -701,7 +729,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.appname, "sr3rs");
+        assert_eq!(config.appname, "sr3");
         assert_eq!(config.exchange, "xpublic");
     }
 
@@ -752,6 +780,7 @@ mod tests {
         writeln!(inc_file, "prefetch 42").unwrap();
 
         let mut config = Config::new();
+        // Since load now resolves paths, we'll use literal for test
         config.load(main_path.to_str().unwrap()).unwrap();
 
         assert_eq!(config.exchange, "main_ex");
