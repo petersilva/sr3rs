@@ -109,12 +109,29 @@ fn detect_component(component: Option<String>, config_path: &str) -> String {
         return c;
     }
 
+    let config_dir = paths::get_user_config_dir();
+    let path = std::path::Path::new(config_path);
+    
+    // If the path is under our standard config dir, use the first element after the prefix
+    if let Ok(rel) = path.strip_prefix(&config_dir) {
+        if let Some(first) = rel.components().next() {
+            let comp_str = first.as_os_str().to_string_lossy();
+            match comp_str.as_ref() {
+                "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" | "cpost" | "cpump" => {
+                    return comp_str.to_string();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Fallback: try to extract from the path string itself
     let parts: Vec<&str> = config_path.split('/').collect();
-    if parts.len() > 1 {
-        let first = parts[0];
-        match first {
-            "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" => {
-                return first.to_string();
+    // Look from the end for known component names
+    for i in (0..parts.len()).rev() {
+        match parts[i] {
+            "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" | "cpost" | "cpump" => {
+                return parts[i].to_string();
             }
             _ => {}
         }
