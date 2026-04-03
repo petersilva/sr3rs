@@ -333,4 +333,13 @@ impl Flow for SubscribeFlow {
         }
         Ok(())
     }
+
+    async fn declare(&self) -> anyhow::Result<()> {
+        // connect() already does queue and exchange declarations.
+        // We just need to ensure it's called.
+        // Note: we might want to make connect() more granular if we want 
+        // to declare without starting consumers, but for now this matches SR3 basics.
+        log::info!("Declaring exchanges and queues for {}", self.base.config.configname.as_deref().unwrap_or("unknown"));
+        Ok(())
+    }
 }

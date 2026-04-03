@@ -51,6 +51,11 @@ enum Commands {
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
+    /// Declare exchanges and queues on the broker
+    Declare {
+        /// Path or pattern to the configuration file(s)
+        config_pattern: Option<String>,
+    },
     /// Post/Announce specific files
     Post {
         /// Path or pattern to the configuration file(s)
@@ -98,12 +103,17 @@ fn detect_component(config_path: &str) -> String {
     let config_dir = paths::get_user_config_dir();
     let path = std::path::Path::new(config_path);
     
-    // If the path is under our standard config dir, use the first element after the prefix
-    if let Ok(rel) = path.strip_prefix(&config_dir) {
+    let abs_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+
+    if let Ok(rel) = abs_path.strip_prefix(&config_dir) {
         if let Some(first) = rel.components().next() {
             let comp_str = first.as_os_str().to_string_lossy();
             match comp_str.as_ref() {
-                "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" | "cpost" | "cpump" => {
+                "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" | "cpost" | "cpump" | "report" | "sarra" => {
                     return comp_str.to_string();
                 }
                 _ => {}
@@ -111,19 +121,17 @@ fn detect_component(config_path: &str) -> String {
         }
     }
 
-    // Fallback: try to extract from the path string itself
     let parts: Vec<&str> = config_path.split('/').collect();
-    // Look from the end for known component names
     for i in (0..parts.len()).rev() {
         match parts[i] {
-            "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" | "cpost" | "cpump" => {
+            "subscribe" | "poll" | "post" | "watch" | "winnow" | "shovel" | "sender" | "cpost" | "cpump" | "report" | "sarra" => {
                 return parts[i].to_string();
             }
             _ => {}
         }
     }
 
-    "subscribe".to_string() // Default fallback
+    "subscribe".to_string()
 }
 
 fn is_process_running(pid: i32) -> bool {
@@ -133,48 +141,61 @@ fn is_process_running(pid: i32) -> bool {
 
 fn resolve_patterns(pattern: Option<String>) -> Vec<String> {
     let config_dir = paths::get_user_config_dir();
-    let pattern = pattern.unwrap_or_else(|| "*/*.conf".to_string());
     
     let mut results = Vec::new();
     
-    if std::path::Path::new(&pattern).exists() && std::path::Path::new(&pattern).is_file() {
-        results.push(pattern.clone());
-        return results;
+    if let Some(ref p) = pattern {
+        let p_path = std::path::Path::new(p);
+        if p_path.exists() && p_path.is_file() {
+            results.push(p.clone());
+            return results;
+        }
     }
 
-    let full_pattern = if pattern.contains('*') {
-        if pattern.contains('/') {
-            config_dir.join(&pattern).to_string_lossy().to_string()
-        } else {
-            config_dir.join("*").join(&pattern).to_string_lossy().to_string()
-        }
-    } else {
-        config_dir.join("*").join(format!("{}*", pattern)).to_string_lossy().to_string()
-    };
-
-    if let Ok(entries) = glob(&full_pattern) {
-        for entry in entries.flatten() {
-            if entry.is_file() {
-                results.push(entry.to_string_lossy().to_string());
+    let search_patterns = match pattern {
+        Some(ref p) => {
+            if p.contains('*') {
+                if p.contains('/') {
+                    vec![config_dir.join(p).to_string_lossy().to_string()]
+                } else {
+                    vec![config_dir.join("**").join(p).to_string_lossy().to_string()]
+                }
+            } else {
+                if p.contains('/') {
+                    vec![
+                        config_dir.join(p).to_string_lossy().to_string(),
+                        config_dir.join(format!("{}.conf", p)).to_string_lossy().to_string()
+                    ]
+                } else {
+                    vec![
+                        config_dir.join("**").join(p).to_string_lossy().to_string(),
+                        config_dir.join("**").join(format!("{}.conf", p)).to_string_lossy().to_string()
+                    ]
+                }
             }
         }
-    }
+        None => vec![config_dir.join("**").join("*.conf").to_string_lossy().to_string()],
+    };
 
-    if results.is_empty() && !pattern.ends_with(".conf") {
-        let conf_pattern = if pattern.contains('/') {
-            config_dir.join(format!("{}.conf", pattern)).to_string_lossy().to_string()
-        } else {
-            config_dir.join("*").join(format!("{}.conf", pattern)).to_string_lossy().to_string()
-        };
-        if let Ok(entries) = glob(&conf_pattern) {
+    for p in search_patterns {
+        log::debug!("Searching for configs with pattern: {}", p);
+        if let Ok(entries) = glob(&p) {
             for entry in entries.flatten() {
                 if entry.is_file() {
-                    results.push(entry.to_string_lossy().to_string());
+                    let path_str = entry.to_string_lossy().to_string();
+                    let filename = entry.file_name().unwrap_or_default().to_string_lossy();
+                    
+                    if pattern.is_none() && (filename == "credentials.conf" || filename == "default.conf" || filename == "admin.conf") {
+                        continue;
+                    }
+                    results.push(path_str);
                 }
             }
         }
     }
 
+    results.sort();
+    results.dedup();
     results
 }
 
@@ -202,10 +223,17 @@ async fn main() -> Result<()> {
                 let component = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&component);
-                config.load(&config_file)?;
-                config.finalize()?;
-                let json = serde_json::to_string_pretty(&config)?;
-                println!("--- Configuration: {} ---\n{}\n", config_file, json);
+                match config.load(&config_file) {
+                    Ok(_) => {
+                        if let Err(e) = config.finalize() {
+                            log::error!("Failed to finalize {}: {}", config_file, e);
+                            continue;
+                        }
+                        let json = serde_json::to_string_pretty(&config)?;
+                        println!("--- Configuration: {} ---\n{}\n", config_file, json);
+                    }
+                    Err(e) => log::error!("Failed to load {}: {}", config_file, e),
+                }
             }
         }
         Commands::Foreground { config_pattern } => {
@@ -251,10 +279,23 @@ async fn main() -> Result<()> {
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
-                config.load(&config_file)?;
-                config.finalize()?;
+                if let Err(e) = config.load(&config_file) {
+                    log::error!("Failed to load {}: {}", config_file, e);
+                    continue;
+                }
+                if let Err(e) = config.finalize() {
+                    log::error!("Failed to finalize {}: {}", config_file, e);
+                    continue;
+                }
 
                 let num_instances = config.instances;
+                
+                let state_dir = paths::get_user_cache_dir().join(&comp).join(config.configname.as_deref().unwrap_or("unknown"));
+                std::fs::create_dir_all(&state_dir)?;
+                let state_file = state_dir.join("instances_expected");
+                let mut f = std::fs::File::create(state_file)?;
+                write!(f, "{}", num_instances)?;
+
                 for i in 1..=num_instances {
                     let pid_file = paths::get_pid_filename(&comp, config.configname.as_deref(), i);
                     if pid_file.exists() {
@@ -290,9 +331,16 @@ async fn main() -> Result<()> {
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
                 if let Err(_) = config.load(&config_file) { continue; }
-                config.finalize()?;
+                if let Err(_) = config.finalize() { continue; }
 
                 let config_name = config.configname.as_deref();
+                
+                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name.unwrap_or("unknown"));
+                let state_file = state_dir.join("instances_expected");
+                if state_file.exists() {
+                    let _ = std::fs::remove_file(state_file);
+                }
+
                 let mut stopped_count = 0;
                 for i in 1..=100 { 
                     let pid_file = paths::get_pid_filename(&comp, config_name, i);
@@ -320,22 +368,44 @@ async fn main() -> Result<()> {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
 
-            println!("{:<25} {:<10} {:<10}", "Component/Config", "State", "Processes");
-            println!("{:<25} {:<10} {:<10}", "----------------", "-----", "---------");
+            if configs.is_empty() {
+                println!("No configurations found in {}", paths::get_user_config_dir().display());
+                return Ok(());
+            }
+
+            println!("{:<35} {:<10} {:<10}", "Component/Config", "State", "Processes");
+            println!("{:<35} {:<10} {:<10}", "----------------", "-----", "---------");
 
             for config_file in configs {
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
-                if let Err(_) = config.load(&config_file) { continue; }
-                config.finalize()?;
+                
+                let config_loaded = config.load(&config_file).is_ok();
+                let config_finalized = if config_loaded { config.finalize().is_ok() } else { false };
 
-                let config_name = config.configname.as_deref();
+                let config_name = if config_loaded {
+                    config.configname.clone()
+                } else {
+                    std::path::Path::new(&config_file)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                };
+
                 let mut running_count = 0;
-                let expected_count = config.instances;
+                let expected_count = if config_loaded { config.instances } else { 1 };
+                
+                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
+                let state_file = state_dir.join("instances_expected");
+                
+                let instances_requested = if state_file.exists() {
+                    std::fs::read_to_string(state_file).ok().and_then(|s| s.parse().ok()).unwrap_or(0)
+                } else {
+                    0
+                };
 
                 for i in 1..=100 {
-                    let pid_file = paths::get_pid_filename(&comp, config_name, i);
+                    let pid_file = paths::get_pid_filename(&comp, config_name.as_deref(), i);
                     if pid_file.exists() {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.parse::<i32>() {
@@ -344,23 +414,61 @@ async fn main() -> Result<()> {
                                 }
                             }
                         }
-                    } else if i > expected_count {
+                    } else if i > 10 && i > expected_count { 
                         break;
                     }
                 }
 
-                let state = if running_count == 0 {
-                    "STOPPED"
-                } else if running_count < expected_count {
-                    "PARTIAL"
+                let mut state = if instances_requested == 0 && running_count == 0 {
+                    "NEW".to_string()
+                } else if running_count == 0 {
+                    "STOPPED".to_string()
+                } else if running_count < instances_requested {
+                    "PARTIAL".to_string()
                 } else {
-                    "RUNNING"
+                    "RUNNING".to_string()
                 };
 
-                let name = format!("{}/{}", comp, config.configname.as_deref().unwrap_or("unknown"));
-                println!("{:<25} {:<10} {}/{}", name, state, running_count, expected_count);
+                if !config_loaded || !config_finalized {
+                    state = format!("{} (ERR)", state);
+                }
+
+                let name = format!("{}/{}", comp, config_name.as_deref().unwrap_or("unknown"));
+                println!("{:<35} {:<10} {}/{}", name, state, running_count, expected_count);
             }
             println!();
+        }
+        Commands::Declare { config_pattern } => {
+            setup_logging(log_level, None)?;
+            let configs = resolve_patterns(config_pattern);
+            for config_file in configs {
+                let component = detect_component(&config_file);
+                let mut config = Config::new();
+                config.apply_component_defaults(&component);
+                if let Err(e) = config.load(&config_file) {
+                    log::error!("Failed to load {}: {}", config_file, e);
+                    continue;
+                }
+                if let Err(e) = config.finalize() {
+                    log::error!("Failed to finalize {}: {}", config_file, e);
+                    continue;
+                }
+
+                match component.as_str() {
+                    "subscribe" | "shovel" | "post" => {
+                        let mut flow = SubscribeFlow::new(config);
+                        if let Err(e) = flow.connect().await {
+                            log::error!("Failed to connect for {}: {}", config_file, e);
+                            continue;
+                        }
+                        if let Err(e) = flow.declare().await {
+                            log::error!("Failed to declare for {}: {}", config_file, e);
+                        }
+                        flow.shutdown().await?;
+                    }
+                    _ => log::warn!("Declare not implemented for component: {}", component),
+                }
+            }
         }
         Commands::Post { config, files } => {
             setup_logging(log_level, None)?;
