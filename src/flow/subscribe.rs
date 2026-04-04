@@ -44,6 +44,7 @@ pub struct SubscribeFlow {
     pub base: BaseFlow,
     pub consumers: Vec<Arc<Mutex<AmqpConsumer>>>,
     pub publishers: Vec<Arc<Mutex<AmqpPublisher>>>,
+    pub declaration_channels: Vec<Channel>,
 }
 
 impl SubscribeFlow {
@@ -52,16 +53,68 @@ impl SubscribeFlow {
             base: BaseFlow::new(config),
             consumers: Vec::new(),
             publishers: Vec::new(),
+            declaration_channels: Vec::new(),
         }
     }
 
     pub async fn connect(&mut self) -> anyhow::Result<()> {
         let subscriptions_count = self.base.config.subscriptions.len();
-        for idx in 0..subscriptions_count {
-            self.connect_subscription(idx).await?;
+        if subscriptions_count > 0 {
+            for idx in 0..subscriptions_count {
+                self.connect_subscription(idx).await?;
+            }
+        } else if let Some(broker_cfg) = &self.base.config.broker {
+            // If we have a broker but no subscriptions, at least ensure the exchange is declared
+            let addr = broker_cfg.to_lapin_uri();
+            let mut props = ConnectionProperties::default();
+            let conn_name = format!("sr3rs-decl-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
+            props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
+
+            log::info!("Connecting to broker for declaration: {}", addr);
+            let conn = Connection::connect(&addr, props).await?;
+            let channel = conn.create_channel().await?;
+            let exchange = self.base.config.exchange.clone();
+            
+            log::info!("Declaring primary exchange: {}", exchange);
+            channel.exchange_declare(
+                &exchange,
+                lapin::ExchangeKind::Topic,
+                ExchangeDeclareOptions {
+                    durable: true,
+                    ..Default::default()
+                },
+                FieldTable::default(),
+            ).await?;
+            self.declaration_channels.push(channel);
         }
 
         let publishers_config = self.base.config.publishers.clone();
+        if publishers_config.is_empty() {
+             if let Some(broker_cfg) = &self.base.config.post_broker {
+                let addr = broker_cfg.to_lapin_uri();
+                let mut props = ConnectionProperties::default();
+                let conn_name = format!("sr3rs-post-decl-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
+                props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
+
+                log::info!("Connecting to post_broker for declaration: {}", addr);
+                let conn = Connection::connect(&addr, props).await?;
+                let channel = conn.create_channel().await?;
+                let exchange = self.base.config.post_exchange.clone().unwrap_or_else(|| "xpublic".to_string());
+                
+                log::info!("Declaring post exchange: {}", exchange);
+                channel.exchange_declare(
+                    &exchange,
+                    lapin::ExchangeKind::Topic,
+                    ExchangeDeclareOptions {
+                        durable: true,
+                        ..Default::default()
+                    },
+                    FieldTable::default(),
+                ).await?;
+                self.declaration_channels.push(channel);
+             }
+        }
+
         for p_cfg in publishers_config {
             let cred = p_cfg.broker.as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Publisher missing broker credentials"))?;
@@ -329,6 +382,11 @@ impl Flow for SubscribeFlow {
             let amqp = pub_mutex.lock().await;
             if amqp.channel.status().connected() {
                 let _ = amqp.channel.close(200, "Normal shutdown").await;
+            }
+        }
+        for channel in &self.declaration_channels {
+            if channel.status().connected() {
+                let _ = channel.close(200, "Normal shutdown").await;
             }
         }
         Ok(())

@@ -139,7 +139,7 @@ impl CredentialDb {
         Ok(())
     }
 
-    fn make_key(&self, url: &Url) -> String {
+    pub fn make_key(&self, url: &Url) -> String {
         let mut key_url = url.clone();
         let _ = key_url.set_password(None);
         key_url.to_string()
@@ -166,7 +166,11 @@ impl CredentialDb {
             
             // For AMQP, check vhost (path)
             if url.scheme().starts_with("amqp") {
-                if url.path() != u.path() { continue; }
+                let p1 = url.path();
+                let p2 = u.path();
+                let v1 = if p1 == "/" || p1 == "/%2f" || p1.is_empty() { "/" } else { p1.trim_matches('/') };
+                let v2 = if p2 == "/" || p2 == "/%2f" || p2.is_empty() { "/" } else { p2.trim_matches('/') };
+                if v1 != v2 { continue; }
             }
 
             return Some(cred);

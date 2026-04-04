@@ -455,7 +455,7 @@ async fn main() -> Result<()> {
                 }
 
                 match component.as_str() {
-                    "subscribe" | "shovel" | "post" => {
+                    "subscribe" | "shovel" | "post" | "cpost" | "cpump" | "poll" | "report" | "sarra" | "sender" | "watch" | "winnow" => {
                         let mut flow = SubscribeFlow::new(config);
                         if let Err(e) = flow.connect().await {
                             log::error!("Failed to connect for {}: {}", config_file, e);
