@@ -204,3 +204,85 @@ fn test_multi_publishers() {
     assert_eq!(config.publishers[0].exchange, vec!["x1".to_string()]);
     assert_eq!(config.publishers[1].exchange, vec!["x2".to_string()]);
 }
+
+#[test]
+fn test_stable_rand() {
+    use tempfile::tempdir;
+    let dir = tempdir().unwrap();
+    let home = dir.path().to_path_buf();
+    
+    // We need to set HOME so directories/paths uses it
+    let old_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", &home);
+
+    println!("Cache dir: {:?}", paths::get_user_cache_dir());
+
+    let config_path = home.join("test.conf");
+    std::fs::write(&config_path, "prefetch 10").unwrap();
+
+    let mut config = Config::default();
+    config.apply_component_defaults("testcomp");
+    config.load(config_path.to_str().unwrap()).unwrap();
+    
+    let r4 = config.rand4.clone();
+    let r8 = config.rand8.clone();
+    
+    // Reload
+    let mut config2 = Config::default();
+    config2.apply_component_defaults("testcomp");
+    config2.load(config_path.to_str().unwrap()).unwrap();
+    
+    assert_eq!(config2.rand4, r4);
+    assert_eq!(config2.rand8, r8);
+
+    // Restore HOME
+    if let Some(h) = old_home {
+        std::env::set_var("HOME", h);
+    } else {
+        std::env::remove_var("HOME");
+    }
+}
+
+#[test]
+fn test_subscriptions_persistence() {
+    use tempfile::tempdir;
+    let dir = tempdir().unwrap();
+    let home = dir.path().to_path_buf();
+    
+    let old_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", &home);
+
+    let config_path = home.join("test.conf");
+    std::fs::write(&config_path, "
+        broker amqp://feeder@localhost/
+        subtopic topic.#
+    ").unwrap();
+
+    let mut config = Config::default();
+    config.apply_component_defaults("subscribe");
+    config.load(config_path.to_str().unwrap()).unwrap();
+    config.finalize().unwrap();
+    
+    assert_eq!(config.subscriptions.len(), 1);
+    let q_name = config.subscriptions[0].queue.name.clone();
+    
+    // Check if file exists
+    let cache_dir = paths::get_user_cache_dir();
+    let state_path = cache_dir.join("subscribe/test/subscriptions.json");
+    println!("Checking state path: {:?}", state_path);
+    assert!(state_path.exists());
+
+    // Reload
+    let mut config2 = Config::default();
+    config2.apply_component_defaults("subscribe");
+    config2.load(config_path.to_str().unwrap()).unwrap();
+    
+    assert_eq!(config2.subscriptions.len(), 1);
+    assert_eq!(config2.subscriptions[0].queue.name, q_name);
+
+    if let Some(h) = old_home {
+        std::env::set_var("HOME", h);
+    } else {
+        std::env::remove_var("HOME");
+    }
+}

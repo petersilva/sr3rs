@@ -10,6 +10,7 @@ pub mod credentials;
 pub mod subscription;
 pub mod publisher;
 pub mod paths;
+pub mod state;
 
 #[cfg(test)]
 mod config_test;
@@ -100,7 +101,7 @@ impl Default for Config {
         let r8: u32 = rng.gen();
 
         Self {
-            appname: "sr3".to_string(),
+            appname: "sr3rs".to_string(),
             component: "flow".to_string(),
             configname: None,
             broker: None,
@@ -172,7 +173,14 @@ impl Config {
         
         // configname should be the stem (filename without extension)
         if let Some(stem) = path.file_stem() {
-            self.configname = Some(stem.to_string_lossy().to_string());
+            let configname = stem.to_string_lossy().to_string();
+            self.configname = Some(configname.clone());
+            
+            // Load state now that we have component and configname
+            let state = state::State::load_or_create(&self.component, &configname);
+            self.rand4 = state.rand4;
+            self.rand8 = state.rand8;
+            self.subscriptions = state.subscriptions;
         }
 
         // Add the directory of the config file to search paths for includes
@@ -213,6 +221,15 @@ impl Config {
 
     pub fn apply_component_defaults(&mut self, component: &str) {
         self.component = component.to_string();
+        
+        // If we already have a configname, reload state for the new component
+        if let Some(configname) = &self.configname {
+            let state = state::State::load_or_create(&self.component, configname);
+            self.rand4 = state.rand4;
+            self.rand8 = state.rand8;
+            self.subscriptions = state.subscriptions;
+        }
+
         match component {
             "poll" => {
                 self.nodupe_ttl = 7 * 3600;
@@ -792,6 +809,16 @@ impl Config {
             }
         }
 
+        // Save state (subscriptions.json)
+        if let Some(configname) = &self.configname {
+            let state = state::State {
+                rand4: self.rand4.clone(),
+                rand8: self.rand8.clone(),
+                subscriptions: self.subscriptions.clone(),
+            };
+            let _ = state.save(&self.component, configname);
+        }
+
         Ok(())
     }
 
@@ -871,7 +898,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.appname, "sr3");
+        assert_eq!(config.appname, "sr3rs");
         assert_eq!(config.exchange, "xpublic");
     }
 
