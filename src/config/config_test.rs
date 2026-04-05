@@ -286,3 +286,28 @@ fn test_subscriptions_persistence() {
         std::env::remove_var("HOME");
     }
 }
+
+#[test]
+fn test_duplicate_subscriptions() {
+    let mut config = Config::default();
+    config.apply_component_defaults("subscribe");
+    
+    config.parse_string("broker amqp://feeder@localhost", "test.conf").unwrap();
+    config.parse_string("subtopic topic.#", "test.conf").unwrap();
+    
+    // Finalize should call parse_subscription(None, None) 
+    // but subtopic already added one.
+    config.finalize().unwrap();
+    
+    assert_eq!(config.subscriptions.len(), 1);
+    assert_eq!(config.subscriptions[0].bindings.len(), 1);
+    
+    // Calling subtopic again with same topic should NOT add new subscription
+    config.parse_string("subtopic topic.#", "test.conf").unwrap();
+    assert_eq!(config.subscriptions.len(), 1);
+    
+    // Different topic should add a binding to the SAME subscription
+    config.parse_string("subtopic other.#", "test.conf").unwrap();
+    assert_eq!(config.subscriptions.len(), 1);
+    assert_eq!(config.subscriptions[0].bindings.len(), 2);
+}

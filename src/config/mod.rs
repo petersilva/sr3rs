@@ -171,6 +171,10 @@ impl Config {
     pub fn load(&mut self, input_path: &str) -> Result<(), ConfigError> {
         let path = self.resolve_config_path(input_path)?;
         
+        // Clear before reloading to avoid duplicates
+        self.subscriptions.clear();
+        self.publishers.clear();
+
         // configname should be the stem (filename without extension)
         if let Some(stem) = path.file_stem() {
             let configname = stem.to_string_lossy().to_string();
@@ -222,6 +226,10 @@ impl Config {
     pub fn apply_component_defaults(&mut self, component: &str) {
         self.component = component.to_string();
         
+        // Clear before reloading to avoid duplicates
+        self.subscriptions.clear();
+        self.publishers.clear();
+
         // If we already have a configname, reload state for the new component
         if let Some(configname) = &self.configname {
             let state = state::State::load_or_create(&self.component, configname);
@@ -587,7 +595,10 @@ impl Config {
     fn parse_subscription(&mut self, exchange: Option<String>, topic: Option<String>) {
         if let Some(broker) = &self.broker {
             let resolved_queue_name = self.resolve_queue_name();
-            let broker_url = broker.url.to_string();
+            
+            let mut clean_broker_url = broker.url.clone();
+            let _ = clean_broker_url.set_password(None);
+            let broker_url_str = clean_broker_url.to_string();
             
             let exchange = exchange.unwrap_or_else(|| self.resolve_exchange());
             let topic = topic.unwrap_or_else(|| {
@@ -599,7 +610,10 @@ impl Config {
             let mut found = false;
             for sub in &mut self.subscriptions {
                 if let Some(cred) = &sub.broker {
-                    if cred.url.to_string() == broker_url && sub.queue.name == resolved_queue_name {
+                    let mut clean_sub_url = cred.url.clone();
+                    let _ = clean_sub_url.set_password(None);
+                    
+                    if clean_sub_url.to_string() == broker_url_str && sub.queue.name == resolved_queue_name {
                         if !sub.bindings.iter().any(|b| b.topic == topic && b.exchange.as_deref() == Some(&exchange)) {
                             sub.bindings.push(Binding {
                                 exchange: Some(exchange.clone()),
@@ -752,7 +766,9 @@ impl Config {
                 let expanded = variable_expansion::expand_variables(&broker_url, &vars);
                 self.broker = Some(Broker::parse(&expanded).map_err(|e| ConfigError::Parse(format!("broker finalize error: {}", e)))?);
             }
-            self.parse_subscription(None, None);
+            if self.subscriptions.is_empty() {
+                self.parse_subscription(None, None);
+            }
         }
 
         if let Some(broker) = &mut self.broker {
