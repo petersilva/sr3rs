@@ -491,7 +491,7 @@ async fn main() -> Result<()> {
 
                 // Now cleanup broker resources
                 let mut flow = SubscribeFlow::new(config);
-                if let Err(e) = flow.connect().await {
+                if let Err(e) = flow.connect_full(false, false).await {
                     log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
                 } else {
                     if let Err(e) = flow.cleanup().await {
@@ -525,13 +525,11 @@ async fn main() -> Result<()> {
                             log::error!("Failed to connect for {}: {}", config_file, e);
                             continue;
                         }
-                        if let Err(e) = flow.declare().await {
-                            log::error!("Failed to declare for {}: {}", config_file, e);
-                        }
                         flow.shutdown().await?;
                     }
                     _ => log::warn!("Declare not implemented for component: {}", component),
                 }
+                println!("Declaration complete for {}.", config_file);
             }
         }
         Commands::Post { config, files } => {

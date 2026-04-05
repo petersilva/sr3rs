@@ -4,6 +4,7 @@ use crate::message::Message;
 use async_trait::async_trait;
 use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties, Channel, Consumer, BasicProperties};
 use std::sync::Arc;
+use std::collections::HashSet;
 use tokio::sync::Mutex;
 use futures_util::StreamExt;
 
@@ -58,50 +59,29 @@ impl SubscribeFlow {
     }
 
     pub async fn connect(&mut self) -> anyhow::Result<()> {
+        self.connect_full(true, true).await
+    }
+
+    pub async fn connect_full(&mut self, declare: bool, consume: bool) -> anyhow::Result<()> {
         let subscriptions_count = self.base.config.subscriptions.len();
         if subscriptions_count > 0 {
             for idx in 0..subscriptions_count {
-                self.connect_subscription(idx).await?;
+                self.connect_subscription_full(idx, declare, consume).await?;
             }
         } else if let Some(broker_cfg) = &self.base.config.broker {
-            // If we have a broker but no subscriptions, at least ensure the exchange is declared
-            let addr = broker_cfg.to_lapin_uri();
-            let mut props = ConnectionProperties::default();
-            let conn_name = format!("sr3rs-decl-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
-            props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
-
-            log::info!("Connecting to broker for declaration: {}", addr);
-            let conn = Connection::connect(&addr, props).await?;
-            let channel = conn.create_channel().await?;
-            let exchange = self.base.config.exchange.clone();
-            
-            log::info!("Declaring primary exchange: {}", exchange);
-            channel.exchange_declare(
-                &exchange,
-                lapin::ExchangeKind::Topic,
-                ExchangeDeclareOptions {
-                    durable: true,
-                    ..Default::default()
-                },
-                FieldTable::default(),
-            ).await?;
-            self.declaration_channels.push(channel);
-        }
-
-        let publishers_config = self.base.config.publishers.clone();
-        if publishers_config.is_empty() {
-             if let Some(broker_cfg) = &self.base.config.post_broker {
+            if declare {
+                // If we have a broker but no subscriptions, at least ensure the exchange is declared
                 let addr = broker_cfg.to_lapin_uri();
                 let mut props = ConnectionProperties::default();
-                let conn_name = format!("sr3rs-post-decl-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
+                let conn_name = format!("sr3rs-decl-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
                 props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
 
-                log::info!("Connecting to post_broker for declaration: {}", addr);
+                log::info!("Connecting to broker for declaration: {}", addr);
                 let conn = Connection::connect(&addr, props).await?;
                 let channel = conn.create_channel().await?;
-                let exchange = self.base.config.post_exchange.clone().unwrap_or_else(|| "xpublic".to_string());
+                let exchange = self.base.config.exchange.clone();
                 
-                log::info!("Declaring post exchange: {}", exchange);
+                log::info!("Declaring primary exchange: {}", exchange);
                 channel.exchange_declare(
                     &exchange,
                     lapin::ExchangeKind::Topic,
@@ -112,6 +92,35 @@ impl SubscribeFlow {
                     FieldTable::default(),
                 ).await?;
                 self.declaration_channels.push(channel);
+            }
+        }
+
+        let publishers_config = self.base.config.publishers.clone();
+        if publishers_config.is_empty() {
+             if let Some(broker_cfg) = &self.base.config.post_broker {
+                if declare {
+                    let addr = broker_cfg.to_lapin_uri();
+                    let mut props = ConnectionProperties::default();
+                    let conn_name = format!("sr3rs-post-decl-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
+                    props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
+
+                    log::info!("Connecting to post_broker for declaration: {}", addr);
+                    let conn = Connection::connect(&addr, props).await?;
+                    let channel = conn.create_channel().await?;
+                    let exchange = self.base.config.post_exchange.clone().unwrap_or_else(|| "xpublic".to_string());
+                    
+                    log::info!("Declaring post exchange: {}", exchange);
+                    channel.exchange_declare(
+                        &exchange,
+                        lapin::ExchangeKind::Topic,
+                        ExchangeDeclareOptions {
+                            durable: true,
+                            ..Default::default()
+                        },
+                        FieldTable::default(),
+                    ).await?;
+                    self.declaration_channels.push(channel);
+                }
              }
         }
 
@@ -132,17 +141,19 @@ impl SubscribeFlow {
             let conn = Connection::connect(&addr, props).await?;
             let channel = conn.create_channel().await?;
 
-            for exchange in &p_cfg.exchange {
-                channel.exchange_declare(
-                    exchange,
-                    lapin::ExchangeKind::Topic,
-                    ExchangeDeclareOptions {
-                        durable: p_cfg.durable,
-                        auto_delete: p_cfg.auto_delete,
-                        ..Default::default()
-                    },
-                    FieldTable::default(),
-                ).await?;
+            if declare {
+                for exchange in &p_cfg.exchange {
+                    channel.exchange_declare(
+                        exchange,
+                        lapin::ExchangeKind::Topic,
+                        ExchangeDeclareOptions {
+                            durable: p_cfg.durable,
+                            auto_delete: p_cfg.auto_delete,
+                            ..Default::default()
+                        },
+                        FieldTable::default(),
+                    ).await?;
+                }
             }
 
             self.publishers.push(Arc::new(Mutex::new(AmqpPublisher {
@@ -155,7 +166,7 @@ impl SubscribeFlow {
         Ok(())
     }
 
-    async fn connect_subscription(&mut self, idx: usize) -> anyhow::Result<()> {
+    async fn connect_subscription_full(&mut self, idx: usize, declare: bool, consume: bool) -> anyhow::Result<()> {
         let sub = &self.base.config.subscriptions[idx];
         let cred = sub.broker.as_ref()
             .ok_or_else(|| anyhow::anyhow!("Subscription {} missing broker credentials", idx))?;
@@ -191,48 +202,64 @@ impl SubscribeFlow {
 
         let channel = conn.create_channel().await?;
 
-        log::debug!("Declaring queue: {}", sub.queue.name);
-        channel.queue_declare(
-            &sub.queue.name,
-            QueueDeclareOptions {
-                durable: sub.queue.durable,
-                auto_delete: sub.queue.auto_delete,
-                ..Default::default()
-            },
-            FieldTable::default(),
-        ).await?;
-
-        for binding in &sub.bindings {
-            let exchange = binding.exchange.as_deref().unwrap_or("xpublic");
-            log::info!("Binding queue {} to exchange {} with topic {}", sub.queue.name, exchange, binding.topic);
-            channel.queue_bind(
+        if declare {
+            log::debug!("Declaring queue: {}", sub.queue.name);
+            channel.queue_declare(
                 &sub.queue.name,
-                exchange,
-                &binding.topic,
-                QueueBindOptions::default(),
+                QueueDeclareOptions {
+                    durable: sub.queue.durable,
+                    auto_delete: sub.queue.auto_delete,
+                    ..Default::default()
+                },
                 FieldTable::default(),
             ).await?;
+
+            for binding in &sub.bindings {
+                let exchange = binding.exchange.as_deref().unwrap_or("xpublic");
+                log::info!("Binding queue {} to exchange {} with topic {}", sub.queue.name, exchange, binding.topic);
+                channel.queue_bind(
+                    &sub.queue.name,
+                    exchange,
+                    &binding.topic,
+                    QueueBindOptions::default(),
+                    FieldTable::default(),
+                ).await?;
+            }
         }
 
-        log::info!("Starting consumer on queue: {}", sub.queue.name);
-        let consumer = channel.basic_consume(
-            &sub.queue.name,
-            "sr3rs_consumer",
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        ).await?;
+        if consume {
+            log::info!("Starting consumer on queue: {}", sub.queue.name);
+            let consumer = channel.basic_consume(
+                &sub.queue.name,
+                "sr3rs_consumer",
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            ).await?;
 
-        let new_consumer = Arc::new(Mutex::new(AmqpConsumer {
-            channel,
-            consumer,
-            broker_url: cred.url.to_string(),
-            subscription_idx: idx,
-        }));
+            let new_consumer = Arc::new(Mutex::new(AmqpConsumer {
+                channel,
+                consumer,
+                broker_url: cred.url.to_string(),
+                subscription_idx: idx,
+            }));
 
-        if idx < self.consumers.len() {
-            self.consumers[idx] = new_consumer;
+            if idx < self.consumers.len() {
+                self.consumers[idx] = new_consumer;
+            } else {
+                self.consumers.push(new_consumer);
+            }
         } else {
-            self.consumers.push(new_consumer);
+             // For cleanup, we still need the channel to delete the queue
+             // We can use a dummy consumer structure or just store the channel.
+             // Let's store it as a consumer with a dummy consumer object if possible?
+             // Actually lapin::Consumer is not easily dummy-able.
+             // Let's just create a channel-only representation if needed, 
+             // but for now, we can just not start the consumer and keep it.
+             // Wait, AmqpConsumer HAS a consumer field.
+             
+             // If we are just here for cleanup, we might want to just store the channel.
+             // Let's add the channel to declaration_channels if it's just for cleanup.
+             self.declaration_channels.push(channel);
         }
 
         Ok(())
@@ -251,6 +278,93 @@ impl Flow for SubscribeFlow {
 
     fn publishers(&self) -> Vec<Arc<Mutex<AmqpPublisher>>> {
         self.publishers.clone()
+    }
+
+    async fn cleanup(&self) -> anyhow::Result<()> {
+        log::info!("Cleaning up broker resources for {}", self.base.config.configname.as_deref().unwrap_or("unknown"));
+        
+        let mut deleted_queues = HashSet::new();
+        let mut last_log_time = std::time::Instant::now() - std::time::Duration::from_secs(11);
+
+        // If we have already established channels (e.g. via connect_full), use them.
+        if !self.declaration_channels.is_empty() || !self.consumers.is_empty() {
+            // Collect all unique queues to delete
+            let queues_to_delete: Vec<String> = self.base.config.subscriptions.iter()
+                .map(|s| s.queue.name.clone())
+                .collect();
+
+            // Use the first available channel to delete all queues. 
+            // (Assuming they are on the same broker if we only have one set of channels, 
+            // or we just try each channel for each queue, which is safe)
+            for channel in &self.declaration_channels {
+                for q_name in &queues_to_delete {
+                    if !deleted_queues.contains(q_name) {
+                        if last_log_time.elapsed().as_secs() >= 10 {
+                            log::info!("Deleting queue: {}", q_name);
+                            last_log_time = std::time::Instant::now();
+                        }
+                        if let Ok(_) = channel.queue_delete(q_name, QueueDeleteOptions::default()).await {
+                            deleted_queues.insert(q_name.clone());
+                        }
+                    }
+                }
+            }
+            for consumer_mutex in &self.consumers {
+                let amqp = consumer_mutex.lock().await;
+                for q_name in &queues_to_delete {
+                    if !deleted_queues.contains(q_name) {
+                        if last_log_time.elapsed().as_secs() >= 10 {
+                            log::info!("Deleting queue: {}", q_name);
+                            last_log_time = std::time::Instant::now();
+                        }
+                        if let Ok(_) = amqp.channel.queue_delete(q_name, QueueDeleteOptions::default()).await {
+                            deleted_queues.insert(q_name.clone());
+                        }
+                    }
+                }
+            }
+        } else {
+            // Standalone cleanup connection: group by broker to avoid reconnecting many times
+            let mut broker_map = std::collections::HashMap::new();
+            for sub in &self.base.config.subscriptions {
+                if let Some(cred) = &sub.broker {
+                    broker_map.entry(cred.url.to_string()).or_insert_with(Vec::new).push(sub.queue.name.clone());
+                }
+            }
+
+            for (broker_url, queues) in broker_map {
+                let broker = crate::broker::Broker::parse(&broker_url)?;
+                // We need to re-extract user/password if they were in the original cred but not the url-string
+                // For now, assume url-string has everything needed or we lookup in credentials.
+                // Re-parsing to get a clean URI.
+                let addr = broker.to_lapin_uri();
+                
+                let mut props = ConnectionProperties::default();
+                let conn_name = format!("sr3rs-cleanup-{}-{}", self.base.config.component, self.base.config.configname.as_deref().unwrap_or("unknown"));
+                props.client_properties.insert("connection_name".into(), lapin::types::AMQPValue::LongString(conn_name.into()));
+
+                log::info!("Connecting to broker for queue deletion: {}", broker_url);
+                if let Ok(conn) = Connection::connect(&addr, props).await {
+                    if let Ok(channel) = conn.create_channel().await {
+                        for q_name in queues {
+                            if !deleted_queues.contains(&q_name) {
+                                if last_log_time.elapsed().as_secs() >= 10 {
+                                    log::info!("Deleting queue: {}", q_name);
+                                    last_log_time = std::time::Instant::now();
+                                }
+                                match channel.queue_delete(&q_name, QueueDeleteOptions::default()).await {
+                                    Ok(_) => {
+                                        deleted_queues.insert(q_name);
+                                    },
+                                    Err(e) => log::warn!("Failed to delete queue {}: {}", q_name, e),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
