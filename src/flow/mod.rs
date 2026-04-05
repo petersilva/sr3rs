@@ -252,6 +252,10 @@ pub trait Flow: Send + Sync {
     async fn declare(&self) -> anyhow::Result<()> {
         Ok(())
     }
+
+    async fn cleanup(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 pub struct BaseFlow {

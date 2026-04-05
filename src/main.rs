@@ -51,6 +51,11 @@ enum Commands {
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
+    /// Stop and cleanup flow instances and broker resources
+    Cleanup {
+        /// Path or pattern to the configuration file(s)
+        config_pattern: Option<String>,
+    },
     /// Declare exchanges and queues on the broker
     Declare {
         /// Path or pattern to the configuration file(s)
@@ -437,6 +442,65 @@ async fn main() -> Result<()> {
                 println!("{:<35} {:<10} {}/{}", name, state, running_count, expected_count);
             }
             println!();
+        }
+        Commands::Cleanup { config_pattern } => {
+            setup_logging(log_level, None)?;
+            let configs = resolve_patterns(config_pattern);
+
+            for config_file in configs {
+                let comp = detect_component(&config_file);
+                let mut config = Config::new();
+                config.apply_component_defaults(&comp);
+                if let Err(e) = config.load(&config_file) {
+                    log::error!("Failed to load {}: {}", config_file, e);
+                    continue;
+                }
+                if let Err(e) = config.finalize() {
+                    log::error!("Failed to finalize {}: {}", config_file, e);
+                    continue;
+                }
+
+                // First stop any running instances
+                let config_name = config.configname.as_deref();
+                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name.unwrap_or("unknown"));
+                let state_file = state_dir.join("instances_expected");
+                if state_file.exists() {
+                    let _ = std::fs::remove_file(state_file);
+                }
+
+                let mut stopped_count = 0;
+                for i in 1..=100 { 
+                    let pid_file = paths::get_pid_filename(&comp, config_name, i);
+                    if pid_file.exists() {
+                        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                            if let Ok(pid) = pid_str.parse::<i32>() {
+                                if is_process_running(pid) {
+                                    unsafe { libc::kill(pid, libc::SIGTERM); }
+                                    stopped_count += 1;
+                                }
+                            }
+                        }
+                        let _ = std::fs::remove_file(pid_file);
+                    } else if i > config.instances {
+                        break;
+                    }
+                }
+                if stopped_count > 0 {
+                    println!("Stopped {} instance(s) of {}.", stopped_count, config_file);
+                }
+
+                // Now cleanup broker resources
+                let mut flow = SubscribeFlow::new(config);
+                if let Err(e) = flow.connect().await {
+                    log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
+                } else {
+                    if let Err(e) = flow.cleanup().await {
+                        log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
+                    }
+                    flow.shutdown().await?;
+                }
+                println!("Cleanup complete for {}.", config_file);
+            }
         }
         Commands::Declare { config_pattern } => {
             setup_logging(log_level, None)?;
