@@ -11,6 +11,9 @@ pub mod subscription;
 pub mod publisher;
 pub mod paths;
 
+#[cfg(test)]
+mod config_test;
+
 use credentials::{CredentialDb, Credential};
 use subscription::{Subscription, Binding};
 use publisher::Publisher;
@@ -267,10 +270,9 @@ impl Config {
                 continue;
             }
 
-            let k_raw = parts[0];
-            let k = k_raw.to_lowercase();
+            let k = parts[0];
             let v = if parts.len() > 1 {
-                let value_raw = line[k_raw.len()..].trim();
+                let value_raw = line[k.len()..].trim();
                 let value_expanded = variable_expansion::expand_variables(value_raw, &vars);
                 Some(value_expanded)
             } else {
@@ -290,7 +292,7 @@ impl Config {
                 continue;
             }
 
-            let result = match k.as_str() {
+            let result = match k {
                 "broker" => {
                     if let Some(ref val) = v {
                         self.broker = Some(Broker::parse(val).map_err(|e| ConfigError::ParseContext {
@@ -526,7 +528,6 @@ impl Config {
                     }
                     Ok(())
                 }
-
                 _ => {
                     if let Some(ref val) = v {
                         self.options.insert(k.to_string(), val.to_string());
