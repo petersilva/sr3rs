@@ -7,6 +7,7 @@ pub struct Broker {
     #[serde(with = "url_serde")]
     pub url: Url,
     pub user: Option<String>,
+    #[serde(skip_serializing)]
     pub password: Option<String>,
     pub host: Option<String>,
     pub port: Option<u16>,
@@ -21,7 +22,9 @@ mod url_serde {
     where
         S: Serializer,
     {
-        serializer.serialize_str(url.as_str())
+        let mut u = url.clone();
+        let _ = u.set_password(None);
+        serializer.serialize_str(u.as_str())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Url, D::Error>

@@ -13,10 +13,13 @@ pub struct Credential {
     pub binary: bool,
     pub tls: bool,
     pub prot_p: bool,
+    #[serde(skip_serializing)]
     pub bearer_token: Option<String>,
     pub login_method: Option<String>,
     pub s3_endpoint: Option<String>,
+    #[serde(skip_serializing)]
     pub s3_session_token: Option<String>,
+    #[serde(skip_serializing)]
     pub azure_credentials: Option<String>,
     pub implicit_ftps: bool,
 }
@@ -29,7 +32,9 @@ mod url_serde {
     where
         S: Serializer,
     {
-        serializer.serialize_str(url.as_str())
+        let mut u = url.clone();
+        let _ = u.set_password(None);
+        serializer.serialize_str(u.as_str())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Url, D::Error>

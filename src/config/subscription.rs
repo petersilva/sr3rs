@@ -45,7 +45,11 @@ mod broker_serde {
         S: Serializer,
     {
         match cred {
-            Some(c) => serializer.serialize_str(c.url.as_str()),
+            Some(c) => {
+                let mut u = c.url.clone();
+                let _ = u.set_password(None);
+                serializer.serialize_str(u.as_str())
+            },
             None => serializer.serialize_none(),
         }
     }
