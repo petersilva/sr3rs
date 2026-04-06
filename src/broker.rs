@@ -37,6 +37,11 @@ impl Broker {
     pub fn parse(uri: &str) -> Result<Self, ConfigError> {
         let mut url = Url::parse(uri)?;
         
+        // Normalize amqp URLs: if path is empty, make it "/" for consistency
+        if url.scheme().starts_with("amqp") && url.path().is_empty() {
+            let _ = url.set_path("/");
+        }
+
         let user = if !url.username().is_empty() {
             Some(url.username().to_string())
         } else {

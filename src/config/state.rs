@@ -35,7 +35,15 @@ impl State {
         // 1. Try loading from our own full state file first
         if state_json_path.exists() {
             if let Ok(content) = fs::read_to_string(&state_json_path) {
-                if let Ok(state) = serde_json::from_str::<State>(&content) {
+                if let Ok(mut state) = serde_json::from_str::<State>(&content) {
+                    // Deduplicate
+                    let mut unique_subs: Vec<Subscription> = Vec::new();
+                    for sub in state.subscriptions.drain(..) {
+                        if !unique_subs.contains(&sub) {
+                            unique_subs.push(sub);
+                        }
+                    }
+                    state.subscriptions = unique_subs;
                     return state;
                 }
             }
@@ -46,7 +54,15 @@ impl State {
             if let Ok(content) = fs::read_to_string(&subscriptions_path) {
                 if let Ok(subscriptions) = serde_json::from_str::<Vec<Subscription>>(&content) {
                     let mut state = Self::new();
-                    state.subscriptions = subscriptions;
+                    
+                    // Deduplicate
+                    let mut unique_subs: Vec<Subscription> = Vec::new();
+                    for sub in subscriptions {
+                        if !unique_subs.contains(&sub) {
+                            unique_subs.push(sub);
+                        }
+                    }
+                    state.subscriptions = unique_subs;
                     
                     // Recover rand8 from the first subscription's queue name
                     if let Some(sub) = state.subscriptions.first() {

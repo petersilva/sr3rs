@@ -598,6 +598,9 @@ impl Config {
             
             let mut clean_broker_url = broker.url.clone();
             let _ = clean_broker_url.set_password(None);
+            if clean_broker_url.scheme().starts_with("amqp") && clean_broker_url.path().is_empty() {
+                let _ = clean_broker_url.set_path("/");
+            }
             let broker_url_str = clean_broker_url.to_string();
             
             let exchange = exchange.unwrap_or_else(|| self.resolve_exchange());
@@ -612,11 +615,12 @@ impl Config {
                 if let Some(cred) = &sub.broker {
                     let mut clean_sub_url = cred.url.clone();
                     let _ = clean_sub_url.set_password(None);
-                    
-                    let sub_url_str = clean_sub_url.to_string();
+                    // Normalize amqp for comparison
+                    if clean_sub_url.scheme().starts_with("amqp") && clean_sub_url.path().is_empty() {
+                        let _ = clean_sub_url.set_path("/");
+                    }
 
-                    //println!("DEBUG: Comparing subscription: sub_url='{}' queue='{}' with broker_url='{}' queue='{}'", 
-                    //    sub_url_str, sub.queue.name, broker_url_str, resolved_queue_name);
+                    let sub_url_str = clean_sub_url.to_string();
 
                     if sub_url_str == broker_url_str && sub.queue.name == resolved_queue_name {
                         if !sub.bindings.iter().any(|b| b.topic == topic && b.exchange.as_deref() == Some(&exchange)) {
@@ -630,6 +634,7 @@ impl Config {
                     }
                 }
             }
+
 
             if !found {
                 let cred = Credential::new(broker.url.clone());
@@ -771,11 +776,19 @@ impl Config {
                 let expanded = variable_expansion::expand_variables(&broker_url, &vars);
                 self.broker = Some(Broker::parse(&expanded).map_err(|e| ConfigError::Parse(format!("broker finalize error: {}", e)))?);
             }
-            //println!("DEBUG: finalize: broker exists, subscriptions.is_empty() = {}", self.subscriptions.is_empty());
             if self.subscriptions.is_empty() {
                 self.parse_subscription(None, None);
             }
         }
+
+        // Ensure subscriptions are unique before final password updates and saving
+        let mut unique_subs: Vec<Subscription> = Vec::new();
+        for sub in self.subscriptions.drain(..) {
+            if !unique_subs.contains(&sub) {
+                unique_subs.push(sub);
+            }
+        }
+        self.subscriptions = unique_subs;
 
         if let Some(broker) = &mut self.broker {
             if broker.password.is_none() || broker.user.as_deref() == Some("anonymous") {

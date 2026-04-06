@@ -206,10 +206,6 @@ fn resolve_patterns(pattern: Option<String>) -> Vec<String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let u1 = url::Url::parse("amqp://tfeed@localhost/").unwrap();
-    let u2 = url::Url::parse("amqp://tfeed@localhost").unwrap();
-    println!("DEBUG: u1='{}' path1='{}' u2='{}' path2='{}' u1==u2: {}", u1.to_string(), u1.path(), u2.to_string(), u2.path(), u1 == u2);
-
     let cli = Cli::parse();
 
     let log_level = if cli.debug {
