@@ -311,3 +311,24 @@ fn test_duplicate_subscriptions() {
     assert_eq!(config.subscriptions.len(), 1);
     assert_eq!(config.subscriptions[0].bindings.len(), 2);
 }
+
+#[test]
+fn test_parse_subscription_deduplication() {
+    let mut config = Config::default();
+    config.component = "subscribe".to_string();
+    config.configname = Some("test".to_string());
+    config.broker = Some(Broker::parse("amqp://feeder@localhost/").unwrap());
+    
+    // 1. Initial call adds one
+    config.parse_subscription(None, None);
+    assert_eq!(config.subscriptions.len(), 1);
+    
+    // 2. Call again with same values should NOT add another one
+    config.parse_subscription(None, None);
+    assert_eq!(config.subscriptions.len(), 1);
+    
+    // 3. Call again with DIFFERENT broker (with password) but same user/host
+    config.broker = Some(Broker::parse("amqp://feeder:secret@localhost/").unwrap());
+    config.parse_subscription(None, None);
+    assert_eq!(config.subscriptions.len(), 1);
+}

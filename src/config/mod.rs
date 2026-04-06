@@ -613,7 +613,12 @@ impl Config {
                     let mut clean_sub_url = cred.url.clone();
                     let _ = clean_sub_url.set_password(None);
                     
-                    if clean_sub_url.to_string() == broker_url_str && sub.queue.name == resolved_queue_name {
+                    let sub_url_str = clean_sub_url.to_string();
+
+                    //println!("DEBUG: Comparing subscription: sub_url='{}' queue='{}' with broker_url='{}' queue='{}'", 
+                    //    sub_url_str, sub.queue.name, broker_url_str, resolved_queue_name);
+
+                    if sub_url_str == broker_url_str && sub.queue.name == resolved_queue_name {
                         if !sub.bindings.iter().any(|b| b.topic == topic && b.exchange.as_deref() == Some(&exchange)) {
                             sub.bindings.push(Binding {
                                 exchange: Some(exchange.clone()),
@@ -766,6 +771,7 @@ impl Config {
                 let expanded = variable_expansion::expand_variables(&broker_url, &vars);
                 self.broker = Some(Broker::parse(&expanded).map_err(|e| ConfigError::Parse(format!("broker finalize error: {}", e)))?);
             }
+            //println!("DEBUG: finalize: broker exists, subscriptions.is_empty() = {}", self.subscriptions.is_empty());
             if self.subscriptions.is_empty() {
                 self.parse_subscription(None, None);
             }
