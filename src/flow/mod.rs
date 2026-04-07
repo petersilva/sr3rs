@@ -12,8 +12,10 @@ use tokio_util::sync::CancellationToken;
 
 pub mod subscribe;
 pub mod log;
+pub mod flowcb;
 
 use crate::flow::log::FlowLog;
+use crate::flow::flowcb::{IncomingCursor, OkCursor, FailedCursor};
 use crate::transfer::get_transfer;
 
 #[derive(Debug, Default)]
@@ -37,6 +39,18 @@ impl Worklist {
         self.failed.clear();
         self.directories_ok.clear();
     }
+
+    pub fn incoming_cursor(&mut self) -> IncomingCursor {
+        IncomingCursor::new()
+    }
+
+    pub fn ok_cursor(&mut self) -> OkCursor {
+        OkCursor::new()
+    }
+
+    pub fn failed_cursor(&mut self) -> FailedCursor {
+        FailedCursor::new()
+    }
 }
 
 #[async_trait]
@@ -44,6 +58,7 @@ pub trait Flow: Send + Sync {
     fn config(&self) -> &Config;
     fn logger(&self) -> Arc<Mutex<FlowLog>>;
     fn publishers(&self) -> Vec<Arc<Mutex<crate::flow::subscribe::MothPublisher>>> { Vec::new() }
+    fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> { Vec::new() }
     
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
     
@@ -87,6 +102,11 @@ pub trait Flow: Send + Sync {
             let logger_arc = self.logger();
             let mut logger = logger_arc.lock().await;
             logger.after_accept(config, worklist);
+        }
+
+        for cb_mutex in self.callbacks() {
+            let cb = cb_mutex.lock().await;
+            cb.after_accept(worklist).await?;
         }
 
         Ok(())
@@ -194,6 +214,12 @@ pub trait Flow: Send + Sync {
             let mut logger = logger_arc.lock().await;
             logger.after_work(self.config(), worklist);
         }
+
+        for cb_mutex in self.callbacks() {
+            let cb = cb_mutex.lock().await;
+            cb.after_work(worklist).await?;
+        }
+
         self.post(worklist).await?;
         self.ack(worklist).await?;
         Ok(())
@@ -209,11 +235,20 @@ pub trait Flow: Send + Sync {
         let mut last_housekeeping = std::time::Instant::now();
         let housekeeping_interval = std::time::Duration::from_secs(self.config().housekeeping as u64);
 
+        for cb_mutex in self.callbacks() {
+            let mut cb = cb_mutex.lock().await;
+            cb.on_start().await?;
+        }
+
         loop {
             tokio::select! {
                 _ = token.cancelled() => {
                     ::log::info!("Shutdown requested. Finalizing...");
                     self.housekeeping(&mut worklist).await?;
+                    for cb_mutex in self.callbacks() {
+                        let mut cb = cb_mutex.lock().await;
+                        cb.on_stop().await?;
+                    }
                     self.shutdown().await?;
                     break;
                 }
@@ -232,6 +267,10 @@ pub trait Flow: Send + Sync {
                     _ = token.cancelled() => {
                         ::log::info!("Shutdown requested during sleep. Finalizing...");
                         self.housekeeping(&mut worklist).await?;
+                        for cb_mutex in self.callbacks() {
+                            let mut cb = cb_mutex.lock().await;
+                            cb.on_stop().await?;
+                        }
                         self.shutdown().await?;
                         return Ok(());
                     }
@@ -242,11 +281,19 @@ pub trait Flow: Send + Sync {
         Ok(())
     }
 
-    async fn housekeeping(&self, _worklist: &mut Worklist) -> anyhow::Result<()> {
-        let logger_arc = self.logger();
-        let mut logger = logger_arc.lock().await;
-        logger.stats(self.config());
-        logger.reset();
+    async fn housekeeping(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        {
+            let logger_arc = self.logger();
+            let mut logger = logger_arc.lock().await;
+            logger.stats(self.config());
+            logger.reset();
+        }
+
+        for cb_mutex in self.callbacks() {
+            let cb = cb_mutex.lock().await;
+            cb.on_housekeeping(worklist).await?;
+        }
+
         Ok(())
     }
 
@@ -266,6 +313,7 @@ pub trait Flow: Send + Sync {
 pub struct BaseFlow {
     pub config: Config,
     pub logger: Arc<Mutex<FlowLog>>,
+    pub callbacks: Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>>,
 }
 
 impl BaseFlow {
@@ -273,6 +321,7 @@ impl BaseFlow {
         Self {
             config,
             logger: Arc::new(Mutex::new(FlowLog::new())),
+            callbacks: Vec::new(),
         }
     }
 }
@@ -285,6 +334,10 @@ impl Flow for BaseFlow {
 
     fn logger(&self) -> Arc<Mutex<FlowLog>> {
         self.logger.clone()
+    }
+
+    fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> {
+        self.callbacks.clone()
     }
 
     async fn gather(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
