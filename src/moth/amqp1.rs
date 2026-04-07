@@ -25,6 +25,9 @@ impl Moth for Amqp1 {
     async fn declare_exchange(&mut self, _exchange: &str, _kind: &str) -> Result<()> {
         Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
     }
+    async fn delete_queue(&mut self, _queue_name: &str) -> Result<()> {
+        Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
+    }
     async fn close(&mut self) -> Result<()> {
         Ok(())
     }

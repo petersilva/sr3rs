@@ -22,7 +22,7 @@ pub struct SubscribeFlow {
     pub base: BaseFlow,
     pub consumers: Vec<Arc<Mutex<MothConsumer>>>,
     pub publishers: Vec<Arc<Mutex<MothPublisher>>>,
-    pub declaration_moths: Vec<Box<dyn Moth>>,
+    pub declaration_moths: Vec<Arc<Mutex<Box<dyn Moth>>>>,
 }
 
 impl SubscribeFlow {
@@ -53,7 +53,7 @@ impl SubscribeFlow {
                 
                 log::info!("Declaring primary exchange: {}", exchange);
                 moth.declare_exchange(&exchange, "topic").await?;
-                self.declaration_moths.push(moth);
+                self.declaration_moths.push(Arc::new(Mutex::new(moth)));
             }
         }
 
@@ -67,7 +67,7 @@ impl SubscribeFlow {
                     
                     log::info!("Declaring post exchange: {}", exchange);
                     moth.declare_exchange(&exchange, "topic").await?;
-                    self.declaration_moths.push(moth);
+                    self.declaration_moths.push(Arc::new(Mutex::new(moth)));
                 }
              }
         }
@@ -133,7 +133,7 @@ impl SubscribeFlow {
                 self.consumers.push(new_consumer);
             }
         } else {
-             self.declaration_moths.push(moth);
+             self.declaration_moths.push(Arc::new(Mutex::new(moth)));
         }
 
         Ok(())
@@ -155,8 +155,73 @@ impl Flow for SubscribeFlow {
     }
 
     async fn cleanup(&self) -> anyhow::Result<()> {
-        // Cleanup logic might need direct protocol calls if Moth doesn't abstract queue deletion.
-        // For now, let's keep it minimal as Moth doesn't have delete_queue yet.
+        log::info!("Cleaning up broker resources for {}", self.base.config.configname.as_deref().unwrap_or("unknown"));
+        
+        let mut deleted_queues = std::collections::HashSet::new();
+        let mut last_log_time = std::time::Instant::now() - std::time::Duration::from_secs(11);
+
+        // Group queues by broker for standalone cleanup
+        let mut broker_map = std::collections::HashMap::new();
+        for sub in &self.base.config.subscriptions {
+            if let Some(cred) = &sub.broker {
+                broker_map.entry(cred.url.to_string()).or_insert_with(Vec::new).push(sub.queue.name.clone());
+            }
+        }
+
+        // 1. Use established moths if available
+        for consumer_mutex in &self.consumers {
+            let mut consumer = consumer_mutex.lock().await;
+            for sub in &self.base.config.subscriptions {
+                if !deleted_queues.contains(&sub.queue.name) {
+                    if last_log_time.elapsed().as_secs() >= 10 {
+                        log::info!("Deleting queue: {}", sub.queue.name);
+                        last_log_time = std::time::Instant::now();
+                    }
+                    if let Ok(_) = consumer.moth.delete_queue(&sub.queue.name).await {
+                        deleted_queues.insert(sub.queue.name.clone());
+                    }
+                }
+            }
+        }
+
+        // 2. Try declaration moths
+        for moth_mutex in &self.declaration_moths {
+            let mut moth = moth_mutex.lock().await;
+            for sub in &self.base.config.subscriptions {
+                if !deleted_queues.contains(&sub.queue.name) {
+                    if last_log_time.elapsed().as_secs() >= 10 {
+                        log::info!("Deleting queue: {}", sub.queue.name);
+                        last_log_time = std::time::Instant::now();
+                    }
+                    if let Ok(_) = moth.delete_queue(&sub.queue.name).await {
+                        deleted_queues.insert(sub.queue.name.clone());
+                    }
+                }
+            }
+        }
+
+        // 3. Standalone cleanup connections
+        for (broker_url, queues) in broker_map {
+            let broker = crate::broker::Broker::parse(&broker_url)?;
+            log::info!("Connecting to broker for standalone queue deletion: {}", broker_url);
+            if let Ok(mut moth) = MothFactory::new(&broker, false).await {
+                for q_name in queues {
+                    if !deleted_queues.contains(&q_name) {
+                        if last_log_time.elapsed().as_secs() >= 10 {
+                            log::info!("Deleting queue: {}", q_name);
+                            last_log_time = std::time::Instant::now();
+                        }
+                        match moth.delete_queue(&q_name).await {
+                            Ok(_) => {
+                                deleted_queues.insert(q_name);
+                            },
+                            Err(e) => log::warn!("Failed to delete queue {}: {}", q_name, e),
+                        }
+                    }
+                }
+                let _ = moth.close().await;
+            }
+        }
         Ok(())
     }
 
@@ -248,6 +313,10 @@ impl Flow for SubscribeFlow {
         for pub_mutex in &self.publishers {
             let mut p = pub_mutex.lock().await;
             let _ = p.moth.close().await;
+        }
+        for moth_mutex in &self.declaration_moths {
+            let mut moth = moth_mutex.lock().await;
+            let _ = moth.close().await;
         }
         Ok(())
     }

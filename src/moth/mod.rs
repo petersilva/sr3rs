@@ -27,6 +27,9 @@ pub trait Moth: Send + Sync {
     /// Declare an exchange (optional, implementation-specific)
     async fn declare_exchange(&mut self, exchange: &str, kind: &str) -> Result<()>;
 
+    /// Delete a queue
+    async fn delete_queue(&mut self, queue_name: &str) -> Result<()>;
+
     /// Close connection
     async fn close(&mut self) -> Result<()>;
 }

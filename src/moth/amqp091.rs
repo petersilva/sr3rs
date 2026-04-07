@@ -152,6 +152,11 @@ impl Moth for Amqp091 {
         Ok(())
     }
 
+    async fn delete_queue(&mut self, queue_name: &str) -> Result<()> {
+        self.channel.queue_delete(queue_name, QueueDeleteOptions::default()).await?;
+        Ok(())
+    }
+
     async fn close(&mut self) -> Result<()> {
         self.connection.close(0, "Moth closed").await?;
         Ok(())
