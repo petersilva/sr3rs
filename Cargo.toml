@@ -2,6 +2,7 @@
 name = "sr3rs"
 version = "0.1.0"
 edition = "2021"
+default-run = "sr3rs"
 
 [dependencies]
 regex = "1.10"
