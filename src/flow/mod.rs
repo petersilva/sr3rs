@@ -204,9 +204,10 @@ pub trait Flow: Send + Sync {
         Ok(())
     }
 
-    async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+    async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<usize> {
         self.gather(worklist).await?;
         self.filter(worklist).await?;
+        let processed_count = worklist.incoming.len() + worklist.ok.len();
         self.accept(worklist).await?;
         self.work(worklist).await?;
         {
@@ -222,7 +223,7 @@ pub trait Flow: Send + Sync {
 
         self.post(worklist).await?;
         self.ack(worklist).await?;
-        Ok(())
+        Ok(processed_count)
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -234,6 +235,8 @@ pub trait Flow: Send + Sync {
         let mut worklist = Worklist::new();
         let mut last_housekeeping = std::time::Instant::now();
         let housekeeping_interval = std::time::Duration::from_secs(self.config().housekeeping as u64);
+        let mut total_messages: usize = 0;
+        let message_count_max = self.config().message_count_max as usize;
 
         for cb_mutex in self.callbacks() {
             let mut cb = cb_mutex.lock().await;
@@ -253,7 +256,18 @@ pub trait Flow: Send + Sync {
                     break;
                 }
                 res = self.run_once(&mut worklist) => {
-                    res?;
+                    let count = res?;
+                    total_messages += count;
+                    if message_count_max > 0 && total_messages >= message_count_max {
+                        ::log::info!("{} messages processed >= messageCountMax {}. Shutting down...", total_messages, message_count_max);
+                        self.housekeeping(&mut worklist).await?;
+                        for cb_mutex in self.callbacks() {
+                            let mut cb = cb_mutex.lock().await;
+                            cb.on_stop().await?;
+                        }
+                        self.shutdown().await?;
+                        break;
+                    }
                 }
             }
             

@@ -62,6 +62,7 @@ pub struct Config {
     pub mirror: bool,
     pub instances: u32,
     pub housekeeping: u32, // seconds
+    pub message_count_max: u32,
     pub log_level: String,
     
     #[serde(skip)]
@@ -126,6 +127,7 @@ impl Default for Config {
             mirror: true, // Default for most components in SR3
             instances: 1,
             housekeeping: 300,
+            message_count_max: 0,
             log_level: "info".to_string(),
             credentials: CredentialDb::new(),
             subscriptions: Vec::new(),
@@ -428,6 +430,12 @@ impl Config {
                 "housekeeping" => {
                     if let Some(ref val) = v {
                         self.housekeeping = parse_duration(val);
+                    }
+                    Ok(())
+                }
+                "messageCountMax" => {
+                    if let Some(ref val) = v {
+                        self.message_count_max = parse_count(val);
                     }
                     Ok(())
                 }
@@ -797,6 +805,12 @@ impl Config {
 
         let cred_path = self.get_credential_path();
         let _ = self.credentials.load(&cred_path);
+
+        if self.message_count_max > 0 && self.batch > self.message_count_max {
+            log::info!("{}/{} overriding batch for consistency with messageCountMax: {}", 
+                self.component, self.configname.as_deref().unwrap_or("unknown"), self.message_count_max);
+            self.batch = self.message_count_max;
+        }
 
         if self.post_broker.is_some() {
             let broker_url = self.post_broker.as_ref().unwrap().url.to_string();
