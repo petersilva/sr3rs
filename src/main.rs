@@ -56,6 +56,16 @@ enum Commands {
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
+    /// Enable flow instance(s)
+    Enable {
+        /// Path or pattern to the configuration file(s)
+        config_pattern: Option<String>,
+    },
+    /// Disable flow instance(s)
+    Disable {
+        /// Path or pattern to the configuration file(s)
+        config_pattern: Option<String>,
+    },
     /// Stop and cleanup flow instances and broker resources
     Cleanup {
         /// Path or pattern to the configuration file(s)
@@ -142,6 +152,11 @@ async fn main() -> Result<()> {
             config.load(config_file)?;
             config.finalize()?;
 
+            let state_dir = paths::get_user_cache_dir().join(&component).join(config.configname.as_deref().unwrap_or("unknown"));
+            if state_dir.join("disabled").exists() {
+                anyhow::bail!("Config {} is disabled. It must be enabled before running.", config_file);
+            }
+
             let token = tokio_util::sync::CancellationToken::new();
             let token_clone = token.clone();
             tokio::spawn(async move {
@@ -177,9 +192,13 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                let num_instances = config.instances;
-                
                 let state_dir = paths::get_user_cache_dir().join(&comp).join(config.configname.as_deref().unwrap_or("unknown"));
+                if state_dir.join("disabled").exists() {
+                    log::error!("Config {} is disabled. It must be enabled before starting.", config_file);
+                    continue;
+                }
+
+                let num_instances = config.instances;
                 std::fs::create_dir_all(&state_dir)?;
                 let state_file = state_dir.join("instances_expected");
                 let mut f = std::fs::File::create(state_file)?;
@@ -308,7 +327,9 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                let mut state = if instances_requested == 0 && running_count == 0 {
+                let mut state = if state_dir.join("disabled").exists() {
+                    "DISABLED".to_string()
+                } else if instances_requested == 0 && running_count == 0 {
                     "NEW".to_string()
                 } else if running_count == 0 {
                     "STOPPED".to_string()
@@ -326,6 +347,87 @@ async fn main() -> Result<()> {
                 println!("{:<35} {:<10} {}/{}", name, state, running_count, expected_count);
             }
             println!();
+        }
+        Commands::Enable { config_pattern } => {
+            setup_logging(log_level, None)?;
+            let configs = resolve_patterns(config_pattern);
+
+            for config_file in configs {
+                let comp = detect_component(&config_file);
+                let mut config = Config::new();
+                config.apply_component_defaults(&comp);
+                if let Err(e) = config.load(&config_file) {
+                    log::error!("Failed to load {}: {}", config_file, e);
+                    continue;
+                }
+                if let Err(e) = config.finalize() {
+                    log::error!("Failed to finalize {}: {}", config_file, e);
+                    continue;
+                }
+
+                let config_name = config.configname.as_deref().unwrap_or("unknown");
+                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name);
+                let disabled_file = state_dir.join("disabled");
+
+                if disabled_file.exists() {
+                    std::fs::remove_file(disabled_file)?;
+                    println!("Enabled {}/{}.", comp, config_name);
+                } else {
+                    println!("{}/{} is already enabled.", comp, config_name);
+                }
+            }
+        }
+        Commands::Disable { config_pattern } => {
+            setup_logging(log_level, None)?;
+            let configs = resolve_patterns(config_pattern);
+
+            for config_file in configs {
+                let comp = detect_component(&config_file);
+                let mut config = Config::new();
+                config.apply_component_defaults(&comp);
+                if let Err(e) = config.load(&config_file) {
+                    log::error!("Failed to load {}: {}", config_file, e);
+                    continue;
+                }
+                if let Err(e) = config.finalize() {
+                    log::error!("Failed to finalize {}: {}", config_file, e);
+                    continue;
+                }
+
+                let config_name = config.configname.as_deref().unwrap_or("unknown");
+                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name);
+                let disabled_file = state_dir.join("disabled");
+
+                if disabled_file.exists() {
+                    println!("{}/{} is already disabled.", comp, config_name);
+                    continue;
+                }
+
+                // Check if any instances are running
+                let mut running = false;
+                for i in 1..=config.instances {
+                    let pid_file = paths::get_pid_filename(&comp, Some(config_name), i);
+                    if pid_file.exists() {
+                        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                            if let Ok(pid) = pid_str.parse::<i32>() {
+                                if is_process_running(pid) {
+                                    running = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if running {
+                    log::error!("Cannot disable {}/{} while it is running!", comp, config_name);
+                    continue;
+                }
+
+                std::fs::create_dir_all(&state_dir)?;
+                std::fs::File::create(disabled_file)?;
+                println!("Disabled {}/{}.", comp, config_name);
+            }
         }
         Commands::Cleanup { config_pattern } => {
             setup_logging(log_level, None)?;
@@ -481,6 +583,11 @@ async fn main() -> Result<()> {
             config.apply_component_defaults(&component);
             config.load(&config_file)?;
             config.finalize()?;
+
+            let state_dir = paths::get_user_cache_dir().join(&component).join(config.configname.as_deref().unwrap_or("unknown"));
+            if state_dir.join("disabled").exists() {
+                anyhow::bail!("Config {} is disabled. Instance {} cannot start.", config_file, instance);
+            }
 
             let log_file = paths::get_log_filename(&component, config.configname.as_deref(), instance);
             let pid_file = paths::get_pid_filename(&component, config.configname.as_deref(), instance);
