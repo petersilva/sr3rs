@@ -27,7 +27,7 @@ impl Moth for Mqtt {
     async fn nack(&mut self, _ack_id: &str) -> Result<()> {
         Err(anyhow::anyhow!("MQTT not implemented"))
     }
-    async fn publish(&mut self, _exchange: &str, _topic: &str, _msg: &Message) -> Result<()> {
+    async fn publish(&mut self, _exchange: &str, _topic: &str, _msg: &Message, _options: &serde_json::Value) -> Result<()> {
         Err(anyhow::anyhow!("MQTT not implemented"))
     }
     async fn declare_exchange(&mut self, _exchange: &str, _kind: &str) -> Result<()> {

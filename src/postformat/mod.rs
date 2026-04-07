@@ -36,10 +36,10 @@ pub fn topic_derive(msg: &Message, options: &serde_json::Value) -> Vec<String> {
     // simplified topic derive matching python
     let mut topic = vec![];
     
-    let topic_prefix = if let Some(publishers) = options.get("publishers").and_then(|p| p.as_array()) {
+    let mut topic_prefix = if let Some(publishers) = options.get("publishers").and_then(|p| p.as_array()) {
         if let Some(publisher_index) = options.get("publisher_index").and_then(|i| i.as_u64()) {
             if let Some(p) = publishers.get(publisher_index as usize) {
-                if let Some(tp) = p.get("topicPrefix").and_then(|tp| tp.as_array()) {
+                if let Some(tp) = p.get("topicPrefix").or_else(|| p.get("topic_prefix")).and_then(|tp| tp.as_array()) {
                     tp.iter()
                         .filter_map(|v| v.as_str().map(String::from))
                         .collect::<Vec<String>>()
@@ -55,6 +55,14 @@ pub fn topic_derive(msg: &Message, options: &serde_json::Value) -> Vec<String> {
     } else {
         vec![]
     };
+
+    if topic_prefix.is_empty() {
+        if let Some(tp) = options.get("topicPrefix").or_else(|| options.get("topic_prefix")).and_then(|tp| tp.as_array()) {
+            topic_prefix = tp.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<String>>();
+        }
+    }
 
     if let Some(t) = msg.fields.get("topic") {
         topic = t.split('.').map(String::from).collect();

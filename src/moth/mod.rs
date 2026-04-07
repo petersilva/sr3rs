@@ -30,7 +30,7 @@ pub trait Moth: Send + Sync {
     async fn nack(&mut self, ack_id: &str) -> Result<()>;
     
     /// Publish a message
-    async fn publish(&mut self, exchange: &str, topic: &str, msg: &Message) -> Result<()>;
+    async fn publish(&mut self, exchange: &str, topic: &str, msg: &Message, options: &serde_json::Value) -> Result<()>;
 
     /// Declare an exchange (optional, implementation-specific)
     async fn declare_exchange(&mut self, exchange: &str, kind: &str) -> Result<()>;

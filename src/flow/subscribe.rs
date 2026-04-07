@@ -18,6 +18,7 @@ pub struct MothConsumer {
 }
 
 pub struct MothPublisher {
+    pub options: serde_json::Value,
     pub moth: Box<dyn Moth>,
     pub broker_url: String,
     pub exchanges: Vec<String>,
@@ -77,7 +78,7 @@ impl SubscribeFlow {
              }
         }
 
-        for p_cfg in publishers_config {
+        for (idx, p_cfg) in publishers_config.into_iter().enumerate() {
             let cred = p_cfg.broker.as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Publisher missing broker credentials"))?;
             
@@ -94,7 +95,13 @@ impl SubscribeFlow {
                 }
             }
 
+            let mut options = serde_json::to_value(&self.base.config).unwrap_or(serde_json::json!({}));
+            if let Some(obj) = options.as_object_mut() {
+                obj.insert("publisher_index".to_string(), serde_json::json!(idx));
+            }
+
             self.publishers.push(Arc::new(Mutex::new(MothPublisher {
+                options,
                 moth,
                 broker_url: cred.url.to_string(),
                 exchanges: p_cfg.exchange.clone(),
@@ -330,8 +337,7 @@ impl Flow for SubscribeFlow {
 impl MothPublisher {
     pub async fn publish_mut(&mut self, msg: &Message) -> anyhow::Result<()> {
         for exchange in &self.exchanges {
-            let topic = msg.rel_path.replace('/', "."); 
-            self.moth.publish(exchange, &topic, msg).await?;
+            self.moth.publish(exchange, "", msg, &self.options).await?;
         }
         Ok(())
     }
