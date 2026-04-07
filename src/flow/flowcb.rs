@@ -5,6 +5,8 @@
 
 pub mod log;
 pub mod sample;
+pub mod pywrapper;
+pub mod retry;
 
 use crate::message::Message;
 use crate::flow::Worklist;
@@ -14,13 +16,22 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub fn get_plugin(name: &str, config: &Config) -> Option<Arc<Mutex<dyn FlowCB>>> {
-    let name = name.to_lowercase();
-    let short_name = name.split('.').last().unwrap_or(&name);
+    let name_lower = name.to_lowercase();
+    let short_name = name_lower.split('.').last().unwrap_or(&name_lower);
     
     match short_name {
         "log" => Some(Arc::new(Mutex::new(log::LogPlugin::new(config)))),
         "sample" => Some(Arc::new(Mutex::new(sample::SamplePlugin::new("sample", "reject_me")))),
-        _ => None,
+        "retry" => Some(Arc::new(Mutex::new(retry::RetryPlugin::new(config)))),
+        _ => {
+            match pywrapper::PyWrapperPlugin::new(name, config) {
+                Ok(plugin) => Some(Arc::new(Mutex::new(plugin))),
+                Err(e) => {
+                    ::log::error!("Failed to load native or Python plugin '{}': {}", name, e);
+                    None
+                }
+            }
+        }
     }
 }
 
