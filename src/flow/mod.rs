@@ -38,7 +38,7 @@ impl Worklist {
 pub trait Flow: Send + Sync {
     fn config(&self) -> &Config;
     fn logger(&self) -> Arc<Mutex<FlowLog>>;
-    fn publishers(&self) -> Vec<Arc<Mutex<crate::flow::subscribe::AmqpPublisher>>> { Vec::new() }
+    fn publishers(&self) -> Vec<Arc<Mutex<crate::flow::subscribe::MothPublisher>>> { Vec::new() }
     
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
     
@@ -158,8 +158,8 @@ pub trait Flow: Send + Sync {
         for m in worklist.ok.drain(..) {
             let mut failed_indices = Vec::new();
             for (idx, pub_mutex) in publishers.iter().enumerate() {
-                let p = pub_mutex.lock().await;
-                if let Err(e) = p.publish(&m).await {
+                let mut p = pub_mutex.lock().await;
+                if let Err(e) = p.publish_mut(&m).await {
                     ::log::error!("POST: failed to publish to {}: {}", p.broker_url, e);
                     failed_indices.push(idx);
                 }

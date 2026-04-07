@@ -1,0 +1,55 @@
+use async_trait::async_trait;
+use crate::broker::Broker;
+use crate::message::Message;
+use anyhow::Result;
+
+pub mod amqp091;
+pub mod amqp1;
+pub mod mqtt;
+
+#[async_trait]
+pub trait Moth: Send + Sync {
+    /// Subscribe to topics (for consumers)
+    async fn subscribe(&mut self, topics: &[String], exchange: &str, queue_name: &str) -> Result<()>;
+    
+    /// Get next message
+    async fn consume(&mut self) -> Result<Option<Message>>;
+    
+    /// Acknowledge a message
+    async fn ack(&mut self, ack_id: &str) -> Result<()>;
+
+    /// Negative-acknowledge a message (requeue)
+    async fn nack(&mut self, ack_id: &str) -> Result<()>;
+    
+    /// Publish a message
+    async fn publish(&mut self, exchange: &str, topic: &str, msg: &Message) -> Result<()>;
+
+    /// Declare an exchange (optional, implementation-specific)
+    async fn declare_exchange(&mut self, exchange: &str, kind: &str) -> Result<()>;
+
+    /// Close connection
+    async fn close(&mut self) -> Result<()>;
+}
+
+pub struct MothFactory;
+
+impl MothFactory {
+    pub async fn new(broker: &Broker, is_subscriber: bool) -> Result<Box<dyn Moth>> {
+        let scheme = broker.url.scheme();
+        match scheme {
+            "amqp" | "amqps" => {
+                let m = amqp091::Amqp091::new(broker, is_subscriber).await?;
+                Ok(Box::new(m))
+            }
+            "mqtt" | "mqtts" => {
+                // Placeholder for MQTT
+                Err(anyhow::anyhow!("MQTT protocol not yet implemented in sr3rs"))
+            }
+            "amqp1" | "amq1" => {
+                // Placeholder for AMQP 1.0
+                Err(anyhow::anyhow!("AMQP 1.0 protocol not yet implemented in sr3rs"))
+            }
+            _ => Err(anyhow::anyhow!("Unsupported protocol scheme: {}", scheme)),
+        }
+    }
+}

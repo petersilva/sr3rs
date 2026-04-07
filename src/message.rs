@@ -10,7 +10,7 @@ pub struct Message {
     #[serde(flatten)]
     pub fields: HashMap<String, String>,
     #[serde(skip)]
-    pub ack_id: Option<u64>,
+    pub ack_id: Option<String>,
 }
 
 impl Message {
