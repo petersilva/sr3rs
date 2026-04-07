@@ -2544,6 +2544,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
+ "percent-encoding",
  "pyo3",
  "rand 0.8.5",
  "regex",

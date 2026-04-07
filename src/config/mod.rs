@@ -85,6 +85,8 @@ pub struct Config {
     pub delete: bool,
     pub dry_run: bool,
     pub nodupe_ttl: u32,
+    pub file_age_min: f64,
+    pub file_age_max: f64,
     pub overwrite: bool,
     pub recursive: bool,
     pub timeout: u32,
@@ -143,6 +145,8 @@ impl Default for Config {
             delete: false,
             dry_run: false,
             nodupe_ttl: 0,
+            file_age_min: 0.0,
+            file_age_max: 0.0,
             overwrite: true,
             recursive: true,
             timeout: 300,
@@ -523,6 +527,18 @@ impl Config {
                 "nodupe_ttl" | "caching" => {
                     if let Some(ref val) = v {
                         self.nodupe_ttl = parse_duration(val);
+                    }
+                    Ok(())
+                }
+                "fileAgeMin" | "file_age_min" => {
+                    if let Some(ref val) = v {
+                        self.file_age_min = parse_duration(val) as f64;
+                    }
+                    Ok(())
+                }
+                "fileAgeMax" | "file_age_max" => {
+                    if let Some(ref val) = v {
+                        self.file_age_max = parse_duration(val) as f64;
                     }
                     Ok(())
                 }

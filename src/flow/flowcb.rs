@@ -7,6 +7,8 @@ pub mod log;
 pub mod sample;
 pub mod pywrapper;
 pub mod retry;
+pub mod mdelaylatest;
+pub mod nodupe;
 
 use crate::message::Message;
 use crate::flow::Worklist;
@@ -23,6 +25,11 @@ pub fn get_plugin(name: &str, config: &Config) -> Option<Arc<Mutex<dyn FlowCB>>>
         "log" => Some(Arc::new(Mutex::new(log::LogPlugin::new(config)))),
         "sample" => Some(Arc::new(Mutex::new(sample::SamplePlugin::new("sample", "reject_me")))),
         "retry" => Some(Arc::new(Mutex::new(retry::RetryPlugin::new(config)))),
+        "mdelaylatest" => Some(Arc::new(Mutex::new(mdelaylatest::MDelayLatestPlugin::new(config)))),
+        "disk" | "nodupe" => Some(Arc::new(Mutex::new(nodupe::disk::DiskNoDupePlugin::new(config)))),
+        "name_only" | "name" => Some(Arc::new(Mutex::new(nodupe::modifiers::NameOnlyPlugin::new()))),
+        "path_only" => Some(Arc::new(Mutex::new(nodupe::modifiers::PathOnlyPlugin::new()))),
+        "data_only" => Some(Arc::new(Mutex::new(nodupe::modifiers::DataOnlyPlugin::new()))),
         _ => {
             match pywrapper::PyWrapperPlugin::new(name, config) {
                 Ok(plugin) => Some(Arc::new(Mutex::new(plugin))),
