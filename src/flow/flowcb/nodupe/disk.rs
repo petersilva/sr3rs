@@ -405,5 +405,49 @@ mod tests {
         assert!(wl.rejected[0].fields.get("reject").unwrap().contains("too old"));
         assert!(wl.rejected[1].fields.get("reject").unwrap().contains("too new"));
     }
+
+    #[tokio::test]
+    async fn test_disk_nodupe_housekeeping_expiry() {
+        let tmp = tempdir().unwrap();
+        let mut config = Config::default();
+        config.component = "sarra".to_string();
+        config.configname = Some("test_hk".to_string());
+        config.nodupe_ttl = 1; // 1 second TTL
+
+        let mut plugin = DiskNoDupePlugin::new(&config);
+        {
+            let mut state = plugin.state.lock().unwrap();
+            state.cache_file = tmp.path().join("hk.cache");
+        }
+        plugin.on_start().await.unwrap();
+
+        let m1 = make_message();
+
+        // 1. Initial accept should pass
+        let mut wl1 = Worklist::new();
+        wl1.incoming.push(m1.clone());
+        plugin.after_accept(&mut wl1).await.unwrap();
+        assert_eq!(wl1.incoming.len(), 1);
+
+        // 2. Immediate second accept should be rejected (cached)
+        let mut wl2 = Worklist::new();
+        wl2.incoming.push(m1.clone());
+        plugin.after_accept(&mut wl2).await.unwrap();
+        assert_eq!(wl2.incoming.len(), 0);
+        assert_eq!(wl2.rejected.len(), 1);
+
+        // 3. Wait for TTL to expire
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+        // 4. Run housekeeping (should clean expired cache)
+        let mut hk_wl = Worklist::new();
+        plugin.on_housekeeping(&mut hk_wl).await.unwrap();
+
+        // 5. Try accepting again, it should pass now
+        let mut wl3 = Worklist::new();
+        wl3.incoming.push(m1.clone());
+        plugin.after_accept(&mut wl3).await.unwrap();
+        assert_eq!(wl3.incoming.len(), 1);
+    }
 }
 
