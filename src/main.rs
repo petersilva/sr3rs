@@ -272,7 +272,7 @@ async fn main() -> Result<()> {
             });
 
             match component.as_str() {
-                "subscribe" | "shovel" | "post" => {
+                "subscribe" | "shovel" | "post" | "sarra" | "report" | "sender" | "poll" | "watch" | "winnow" | "cpost" | "cpump" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
                     flow.run_with_shutdown(token).await?;
@@ -599,7 +599,7 @@ async fn main() -> Result<()> {
             });
 
             let res = match component.as_str() {
-                "subscribe" | "shovel" | "post" => {
+                "subscribe" | "shovel" | "post" | "sarra" | "report" | "sender" | "poll" | "watch" | "winnow" | "cpost" | "cpump" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
                     flow.run_with_shutdown(token).await
