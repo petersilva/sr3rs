@@ -327,10 +327,20 @@ async fn main() -> Result<()> {
                     }
                 }
 
+                let state_exists = if state_dir.exists() {
+                    std::fs::read_dir(&state_dir).map(|mut entries| entries.next().is_some()).unwrap_or(false)
+                } else {
+                    false
+                };
+
                 let mut state = if state_dir.join("disabled").exists() {
                     "DISABLED".to_string()
                 } else if instances_requested == 0 && running_count == 0 {
-                    "NEW".to_string()
+                    if state_exists {
+                        "STOPPED".to_string()
+                    } else {
+                        "NEW".to_string()
+                    }
                 } else if running_count == 0 {
                     "STOPPED".to_string()
                 } else if running_count < instances_requested {
