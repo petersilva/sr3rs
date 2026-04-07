@@ -454,6 +454,11 @@ async fn main() -> Result<()> {
                     let _ = std::fs::remove_file(state_file);
                 }
 
+                let subscriptions_json = state_dir.join("subscriptions.json");
+                if subscriptions_json.exists() {
+                    let _ = std::fs::remove_file(subscriptions_json);
+                }
+
                 let mut stopped_count = 0;
                 for i in 1..=100 { 
                     let pid_file = paths::get_pid_filename(&comp, config_name, i);
