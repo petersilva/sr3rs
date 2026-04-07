@@ -44,3 +44,50 @@ impl Identity for Arbitrary {
         self.value.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init() {
+        // Reset to "None" in case other tests modified it due to parallel execution
+        set_default_value("None".to_string());
+        let hash = Arbitrary::new();
+        assert_eq!(hash.value(), "None");
+    }
+
+    #[test]
+    fn test_registered_as() {
+        let hash = Arbitrary::new();
+        assert_eq!(hash.registered_as(), "a");
+    }
+
+    #[test]
+    fn test_set_path() {
+        let mut hash = Arbitrary::new();
+        hash.set_path("dummy_path.txt");
+        // Passed if no panic
+    }
+
+    #[test]
+    fn test_update() {
+        let mut hash = Arbitrary::new();
+        hash.update(b"randomstring");
+        // Passed if no panic
+    }
+
+    #[test]
+    fn test_property_value() {
+        set_default_value("default".to_string());
+        
+        let mut hash = Arbitrary::new();
+        assert_eq!(hash.value(), "default");
+
+        hash.set_value("new".to_string());
+        assert_eq!(hash.value(), "new");
+        
+        // Reset state
+        set_default_value("None".to_string());
+    }
+}
