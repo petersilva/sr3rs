@@ -10,6 +10,7 @@ pub mod message;
 pub mod flow;
 pub mod transfer;
 pub mod moth;
+pub mod identity;
 
 pub use config::Config;
 pub use message::Message;
