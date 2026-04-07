@@ -61,6 +61,11 @@ enum Commands {
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
     },
+    /// Edit the configuration file(s)
+    Edit {
+        /// Path or pattern to the configuration file(s)
+        config_pattern: Option<String>,
+    },
     /// Declare exchanges and queues on the broker
     Declare {
         /// Path or pattern to the configuration file(s)
@@ -379,6 +384,34 @@ async fn main() -> Result<()> {
                     flow.shutdown().await?;
                 }
                 println!("Cleanup complete for {}.", config_file);
+            }
+        }
+        Commands::Edit { config_pattern } => {
+            setup_logging(log_level, None)?;
+            let configs = resolve_patterns(config_pattern);
+
+            if configs.is_empty() {
+                println!("No configuration files found to edit.");
+                return Ok(());
+            }
+
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
+                if cfg!(target_os = "windows") {
+                    "notepad".to_string()
+                } else {
+                    "vi".to_string()
+                }
+            });
+
+            for config_file in configs {
+                println!("Editing {} with {}...", config_file, editor);
+                let status = Command::new(&editor)
+                    .arg(&config_file)
+                    .status()?;
+                
+                if !status.success() {
+                    log::error!("Editor exited with non-zero status for {}.", config_file);
+                }
             }
         }
         Commands::Declare { config_pattern } => {
