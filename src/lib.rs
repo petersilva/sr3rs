@@ -11,6 +11,7 @@ pub mod flow;
 pub mod transfer;
 pub mod moth;
 pub mod identity;
+pub mod postformat;
 
 pub use config::Config;
 pub use message::Message;

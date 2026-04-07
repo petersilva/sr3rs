@@ -2610,6 +2610,7 @@ dependencies = [
  "fern",
  "futures-util",
  "glob",
+ "hex",
  "humantime",
  "lapin",
  "lazy_static",
