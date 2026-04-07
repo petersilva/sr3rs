@@ -1,3 +1,8 @@
+//
+// This file is part of sr3rs a rust implementation of Sarracenia. ( https://metpx.github.io/sarracenia )
+// Copyright (C) Peter Silva, 2026
+//
+
 use url::Url;
 use crate::config::ConfigError;
 use serde::{Serialize, Deserialize};
@@ -85,16 +90,27 @@ impl Broker {
     }
 
     pub fn to_lapin_uri(&self) -> String {
-        // Lapin/amq-protocol requires vhost to be encoded in the URI if it's the root vhost
-        // but it actually handles amqp://user:pass@host/%2f correctly.
-        // If vhost is "/", we should ensure it's represented as %2f in the path.
-        let mut u = self.url.clone();
+        let u = self.url.clone();
+        let mut s = u.to_string();
+        
         if self.vhost == "/" {
-            u.set_path("/%2f");
+            // RabbitMQ requires %2f for the root vhost in the URI.
+            // Url::to_string() will have / at the end if path is /.
+            // We want to replace the trailing / with /%2f
+            if s.ends_with('/') {
+                s.push_str("%2f");
+            } else {
+                s.push_str("/%2f");
+            }
         } else {
-            u.set_path(&format!("/{}", self.vhost));
+            // For other vhosts, we can't just use set_path because it might escape
+            // but for simple vhost names it's fine. 
+            // However, to be safe and consistent with SR3, we just use the original URL 
+            // if it was parsed with that vhost.
+            // If vhost was changed, we might need more complex logic.
+            // For now, if it's not /, we assume it was in the path.
         }
-        u.to_string()
+        s
     }
 }
 
@@ -114,7 +130,9 @@ mod tests {
     fn test_broker_parse_default_vhost() {
         let broker = Broker::parse("amqps://dd.weather.gc.ca/").unwrap();
         assert_eq!(broker.vhost, "/");
-        assert!(broker.to_lapin_uri().contains("/%2f"));
+        let uri = broker.to_lapin_uri();
+        assert!(uri.ends_with("/%2f"));
+        assert!(!uri.contains("/%252f"));
     }
 
     #[test]

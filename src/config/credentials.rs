@@ -1,3 +1,8 @@
+//
+// This file is part of sr3rs a rust implementation of Sarracenia. ( https://metpx.github.io/sarracenia )
+// Copyright (C) Peter Silva, 2026
+//
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use url::Url;

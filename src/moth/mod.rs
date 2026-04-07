@@ -1,3 +1,8 @@
+//
+// This file is part of sr3rs a rust implementation of Sarracenia. ( https://metpx.github.io/sarracenia )
+// Copyright (C) Peter Silva, 2026
+//
+
 use async_trait::async_trait;
 use crate::broker::Broker;
 use crate::message::Message;
@@ -12,6 +17,9 @@ pub trait Moth: Send + Sync {
     /// Subscribe to topics (for consumers)
     async fn subscribe(&mut self, topics: &[String], exchange: &str, queue_name: &str) -> Result<()>;
     
+    /// Start consuming messages
+    async fn start_consume(&mut self) -> Result<()>;
+
     /// Get next message
     async fn consume(&mut self) -> Result<Option<Message>>;
     

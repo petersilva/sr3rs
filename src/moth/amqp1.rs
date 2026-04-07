@@ -1,3 +1,8 @@
+//
+// This file is part of sr3rs a rust implementation of Sarracenia. ( https://metpx.github.io/sarracenia )
+// Copyright (C) Peter Silva, 2026
+//
+
 use async_trait::async_trait;
 use crate::moth::Moth;
 use crate::message::Message;
@@ -8,6 +13,9 @@ pub struct Amqp1;
 #[async_trait]
 impl Moth for Amqp1 {
     async fn subscribe(&mut self, _topics: &[String], _exchange: &str, _queue_name: &str) -> Result<()> {
+        Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
+    }
+    async fn start_consume(&mut self) -> Result<()> {
         Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
     }
     async fn consume(&mut self) -> Result<Option<Message>> {

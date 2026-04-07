@@ -1,3 +1,8 @@
+//
+// This file is part of sr3rs a rust implementation of Sarracenia. ( https://metpx.github.io/sarracenia )
+// Copyright (C) Peter Silva, 2026
+//
+
 use async_trait::async_trait;
 use crate::moth::Moth;
 use crate::broker::Broker;
@@ -13,6 +18,7 @@ pub struct Amqp091 {
     connection: Connection,
     channel: Channel,
     consumer: Option<Consumer>,
+    queue_name: Option<String>,
 }
 
 impl Amqp091 {
@@ -26,7 +32,7 @@ impl Amqp091 {
             lapin::types::AMQPValue::LongString(conn_name.into())
         );
 
-        log::debug!("MOTH: AMQP 0.9.1 connecting to {}", addr);
+        //println!("MOTH: AMQP 0.9.1 connecting to {}", addr);
         let connection = Connection::connect(&addr, props).await?;
         let channel = connection.create_channel().await?;
 
@@ -34,6 +40,7 @@ impl Amqp091 {
             connection,
             channel,
             consumer: None,
+            queue_name: None,
         })
     }
 }
@@ -43,7 +50,8 @@ impl Moth for Amqp091 {
     async fn subscribe(&mut self, topics: &[String], exchange: &str, queue_name: &str) -> Result<()> {
         log::debug!("MOTH: AMQP 0.9.1 subscribing to topics {:?} on exchange {} with queue {}", topics, exchange, queue_name);
         
-        self.declare_exchange(exchange, "topic").await?;
+        // DO NOT automatically declare exchange here.
+        // Subscribers often have bind permissions but not declare permissions for public exchanges.
 
         self.channel.queue_declare(
             queue_name,
@@ -64,6 +72,17 @@ impl Moth for Amqp091 {
             ).await?;
         }
 
+        self.queue_name = Some(queue_name.to_string());
+        Ok(())
+    }
+
+    async fn start_consume(&mut self) -> Result<()> {
+        if self.consumer.is_some() {
+            return Ok(());
+        }
+
+        let queue_name = self.queue_name.as_ref().ok_or_else(|| anyhow::anyhow!("No queue to consume from. Call subscribe first."))?;
+        
         let consumer = self.channel.basic_consume(
             queue_name,
             "sr3rs-consumer",
@@ -76,7 +95,10 @@ impl Moth for Amqp091 {
     }
 
     async fn consume(&mut self) -> Result<Option<Message>> {
-        let consumer = self.consumer.as_mut().ok_or_else(|| anyhow::anyhow!("Not subscribed"))?;
+        if self.consumer.is_none() {
+            self.start_consume().await?;
+        }
+        let consumer = self.consumer.as_mut().unwrap();
         
         match consumer.next().await {
             Some(Ok(delivery)) => {

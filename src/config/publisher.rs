@@ -1,3 +1,8 @@
+//
+// This file is part of sr3rs a rust implementation of Sarracenia. ( https://metpx.github.io/sarracenia )
+// Copyright (C) Peter Silva, 2026
+//
+
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use crate::config::credentials::Credential;
