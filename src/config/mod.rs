@@ -92,6 +92,8 @@ pub struct Config {
     pub perm_default: u32,
     pub perm_dir_default: u32,
 
+    pub flow_callbacks: Vec<String>,
+
     pub options: HashMap<String, String>,
     pub config_search_paths: Vec<PathBuf>,
     pub rand4: String,
@@ -147,6 +149,8 @@ impl Default for Config {
             sleep: 0.1,
             perm_default: 0,
             perm_dir_default: 0o775,
+
+            flow_callbacks: Vec::new(),
 
             options: HashMap::new(),
             config_search_paths: vec![PathBuf::from(".")],
@@ -555,6 +559,18 @@ impl Config {
                 "permDirDefault" | "chmod_dir" => {
                     if let Some(ref val) = v {
                         self.perm_dir_default = parse_octal(val);
+                    }
+                    Ok(())
+                }
+                "flowCallback" | "callback" => {
+                    if let Some(ref val) = v {
+                        self.flow_callbacks.push(val.to_string());
+                    }
+                    Ok(())
+                }
+                "flowCallbackPrepend" | "callbackPrepend" => {
+                    if let Some(ref val) = v {
+                        self.flow_callbacks.insert(0, val.to_string());
                     }
                     Ok(())
                 }

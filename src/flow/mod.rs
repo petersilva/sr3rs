@@ -318,10 +318,20 @@ pub struct BaseFlow {
 
 impl BaseFlow {
     pub fn new(config: Config) -> Self {
+        let mut callbacks: Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> = Vec::new();
+        
+        for cb_name in &config.flow_callbacks {
+            if let Some(plugin) = crate::flow::flowcb::get_plugin(cb_name, &config) {
+                callbacks.push(plugin);
+            } else {
+                ::log::warn!("Plugin '{}' requested in config but not found or unsupported", cb_name);
+            }
+        }
+
         Self {
             config,
             logger: Arc::new(Mutex::new(FlowLog::new())),
-            callbacks: Vec::new(),
+            callbacks,
         }
     }
 }

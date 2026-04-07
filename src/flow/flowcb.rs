@@ -8,7 +8,21 @@ pub mod sample;
 
 use crate::message::Message;
 use crate::flow::Worklist;
+use crate::Config;
 use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+pub fn get_plugin(name: &str, config: &Config) -> Option<Arc<Mutex<dyn FlowCB>>> {
+    let name = name.to_lowercase();
+    let short_name = name.split('.').last().unwrap_or(&name);
+    
+    match short_name {
+        "log" => Some(Arc::new(Mutex::new(log::LogPlugin::new(config)))),
+        "sample" => Some(Arc::new(Mutex::new(sample::SamplePlugin::new("sample", "reject_me")))),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
