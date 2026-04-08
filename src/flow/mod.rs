@@ -206,6 +206,10 @@ pub trait Flow: Send + Sync {
 
     async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<usize> {
         self.gather(worklist).await?;
+        for cb_mutex in self.callbacks() {
+            let mut cb = cb_mutex.lock().await;
+            cb.gather(worklist).await?;
+        }
         self.filter(worklist).await?;
         let processed_count = worklist.incoming.len() + worklist.ok.len();
         self.accept(worklist).await?;

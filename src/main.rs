@@ -9,6 +9,7 @@ use sr3rs::flow::{Flow, subscribe::SubscribeFlow, Worklist};
 use sr3rs::message::Message;
 use sr3rs::config::paths;
 use sr3rs::utils::{setup_logging, detect_component, resolve_patterns, is_process_running};
+use sr3rs::flow::flowcb::gather_file::GatherFilePlugin;
 use std::path::Path;
 use anyhow::Result;
 use std::io::Write;
@@ -575,14 +576,23 @@ async fn main() -> Result<()> {
                 let mut flow = SubscribeFlow::new(config_obj);
                 flow.connect().await?;
 
+                let gather_file = GatherFilePlugin::new(flow.config());
                 let mut worklist = Worklist::new();
-                for file_path in &files {
-                    match Message::from_file(Path::new(file_path), flow.config()) {
-                        Ok(msg) => {
-                            log::info!("Queuing notification for: {}", file_path);
-                            worklist.ok.push(msg);
+                for file_path_str in &files {
+                    let file_path = Path::new(file_path_str);
+                    if file_path.is_dir() {
+                        log::info!("Scanning directory: {}", file_path_str);
+                        let msgs = gather_file.walk(file_path);
+                        log::info!("Found {} files in directory: {}", msgs.len(), file_path_str);
+                        worklist.ok.extend(msgs);
+                    } else {
+                        match Message::from_file(file_path, flow.config()) {
+                            Ok(msg) => {
+                                log::info!("Queuing notification for: {}", file_path_str);
+                                worklist.ok.push(msg);
+                            }
+                            Err(e) => log::error!("Failed to build message for {}: {}", file_path_str, e),
                         }
-                        Err(e) => log::error!("Failed to build message for {}: {}", file_path, e),
                     }
                 }
 

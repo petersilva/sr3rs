@@ -9,6 +9,7 @@ pub mod pywrapper;
 pub mod retry;
 pub mod mdelaylatest;
 pub mod nodupe;
+pub mod gather_file;
 
 use crate::message::Message;
 use crate::flow::Worklist;
@@ -30,6 +31,7 @@ pub fn get_plugin(name: &str, config: &Config) -> Option<Arc<Mutex<dyn FlowCB>>>
         "name_only" | "name" => Some(Arc::new(Mutex::new(nodupe::modifiers::NameOnlyPlugin::new()))),
         "path_only" => Some(Arc::new(Mutex::new(nodupe::modifiers::PathOnlyPlugin::new()))),
         "data_only" => Some(Arc::new(Mutex::new(nodupe::modifiers::DataOnlyPlugin::new()))),
+        "file" => Some(Arc::new(Mutex::new(gather_file::GatherFilePlugin::new(config)))),
         _ => {
             match pywrapper::PyWrapperPlugin::new(name, config) {
                 Ok(plugin) => Some(Arc::new(Mutex::new(plugin))),
@@ -213,6 +215,11 @@ pub trait FlowCB: Send + Sync {
 
     /// Called when a stop has been requested, allowing for graceful wrap-up.
     async fn please_stop(&mut self) {
+    }
+
+    /// Called during the gather phase.
+    async fn gather(&mut self, _worklist: &mut Worklist) -> anyhow::Result<()> {
+        Ok(())
     }
 
     /// Metrics report for this plugin.
