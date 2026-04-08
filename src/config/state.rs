@@ -84,9 +84,7 @@ impl State {
         }
 
         // Create new state if not found or invalid
-        let state = Self::new();
-        let _ = state.save(component, configname);
-        state
+        Self::new()
     }
 
     pub fn save(&self, component: &str, configname: &str) -> anyhow::Result<()> {

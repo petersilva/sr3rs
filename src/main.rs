@@ -158,6 +158,9 @@ async fn main() -> Result<()> {
                 anyhow::bail!("Config {} is disabled. It must be enabled before running.", config_file);
             }
 
+            // Save state for foreground run
+            config.save_state()?;
+
             let token = tokio_util::sync::CancellationToken::new();
             let token_clone = token.clone();
             tokio::spawn(async move {
@@ -196,6 +199,12 @@ async fn main() -> Result<()> {
                 let state_dir = paths::get_user_cache_dir().join(&comp).join(config.configname.as_deref().unwrap_or("unknown"));
                 if state_dir.join("disabled").exists() {
                     log::error!("Config {} is disabled. It must be enabled before starting.", config_file);
+                    continue;
+                }
+
+                // Save state for daemon run
+                if let Err(e) = config.save_state() {
+                    log::error!("Failed to save state for {}: {}", config_file, e);
                     continue;
                 }
 
@@ -470,6 +479,11 @@ async fn main() -> Result<()> {
                     let _ = std::fs::remove_file(subscriptions_json);
                 }
 
+                let dot_state_json = state_dir.join(".state.json");
+                if dot_state_json.exists() {
+                    let _ = std::fs::remove_file(dot_state_json);
+                }
+
                 let mut stopped_count = 0;
                 for i in 1..=100 { 
                     let pid_file = paths::get_pid_filename(&comp, config_name, i);
@@ -545,6 +559,12 @@ async fn main() -> Result<()> {
                 }
                 if let Err(e) = config.finalize() {
                     log::error!("Failed to finalize {}: {}", config_file, e);
+                    continue;
+                }
+
+                // Save state for declaration
+                if let Err(e) = config.save_state() {
+                    log::error!("Failed to save state for {}: {}", config_file, e);
                     continue;
                 }
 

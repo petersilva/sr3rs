@@ -795,6 +795,18 @@ impl Config {
         Err(ConfigError::FileNotFound(filename.to_string()))
     }
 
+    pub fn save_state(&self) -> Result<(), ConfigError> {
+        if let Some(configname) = &self.configname {
+            let state = state::State {
+                rand4: self.rand4.clone(),
+                rand8: self.rand8.clone(),
+                subscriptions: self.subscriptions.clone(),
+            };
+            let _ = state.save(&self.component, configname);
+        }
+        Ok(())
+    }
+
     pub fn finalize(&mut self) -> Result<(), ConfigError> {
         let mut vars = self.options.clone();
         vars.insert("APPNAME".to_string(), self.appname.clone());
@@ -893,16 +905,6 @@ impl Config {
                     }
                 }
             }
-        }
-
-        // Save state (subscriptions.json)
-        if let Some(configname) = &self.configname {
-            let state = state::State {
-                rand4: self.rand4.clone(),
-                rand8: self.rand8.clone(),
-                subscriptions: self.subscriptions.clone(),
-            };
-            let _ = state.save(&self.component, configname);
         }
 
         Ok(())
