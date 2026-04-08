@@ -128,3 +128,11 @@ pub fn is_process_running(pid: i32) -> bool {
     if pid <= 0 { return false; }
     unsafe { libc::kill(pid, 0) == 0 }
 }
+
+pub fn is_global_config(path_str: &str) -> bool {
+    let path = std::path::Path::new(path_str);
+    if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+        return filename == "admin.conf" || filename == "default.conf" || filename == "credentials.conf";
+    }
+    false
+}
