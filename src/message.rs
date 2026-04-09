@@ -20,9 +20,14 @@ pub struct Message {
 
 impl Message {
     pub fn new(base_url: &str, rel_path: &str) -> Self {
+        let mut b = base_url.to_string();
+        if !b.ends_with('/') {
+            b.push('/');
+        }
+        let r = rel_path.trim_start_matches('/').to_string();
         Self {
-            base_url: base_url.to_string(),
-            rel_path: rel_path.to_string(),
+            base_url: b,
+            rel_path: r,
             pub_time: chrono::Utc::now(),
             fields: HashMap::new(),
             ack_id: None,

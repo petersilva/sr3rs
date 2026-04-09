@@ -68,10 +68,11 @@ pub trait Flow: Send + Sync {
 
         for m in worklist.incoming.drain(..) {
             let url_to_match = format!("{}{}", m.base_url, m.rel_path);
+            let rel_path_to_match = m.rel_path.clone();
             let mut matched_filter = None;
 
             for mask in &config.masks {
-                if mask.matches(&url_to_match) {
+                if mask.matches(&url_to_match) || mask.matches(&rel_path_to_match) {
                     matched_filter = Some(mask.clone());
                     break;
                 }

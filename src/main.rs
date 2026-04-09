@@ -622,7 +622,6 @@ async fn main() -> Result<()> {
                 config_obj.finalize()?;
 
                 let mut flow = SubscribeFlow::new(config_obj);
-                flow.connect().await?;
 
                 let gather_file = GatherFilePlugin::new(flow.config());
                 let mut worklist = Worklist::new();
@@ -632,21 +631,34 @@ async fn main() -> Result<()> {
                         log::info!("Scanning directory: {}", file_path_str);
                         let msgs = gather_file.walk(file_path);
                         log::info!("Found {} files in directory: {}", msgs.len(), file_path_str);
-                        worklist.ok.extend(msgs);
+                        worklist.incoming.extend(msgs);
                     } else {
                         match Message::from_file(file_path, flow.config()) {
                             Ok(msg) => {
                                 log::info!("Queuing notification for: {}", file_path_str);
-                                worklist.ok.push(msg);
+                                worklist.incoming.push(msg);
                             }
                             Err(e) => log::error!("Failed to build message for {}: {}", file_path_str, e),
                         }
                     }
                 }
 
-                if !worklist.ok.is_empty() {
-                    flow.post(&mut worklist).await?;
-                    log::info!("Successfully announced {} files using {}.", worklist.ok.len(), config_file);
+                if !worklist.incoming.is_empty() {
+                    let total_found = worklist.incoming.len();
+                    flow.filter(&mut worklist).await?;
+                    
+                    if !worklist.rejected.is_empty() {
+                        log::info!("Rejected {} files according to configuration.", worklist.rejected.len());
+                    }
+
+                    // Move remaining accepted messages to ok for posting
+                    worklist.ok.extend(worklist.incoming.drain(..));
+
+                    if !worklist.ok.is_empty() {
+                        flow.connect().await?;
+                        flow.post(&mut worklist).await?;
+                        log::info!("Successfully announced {} files (out of {} found) using {}.", worklist.ok.len(), total_found, config_file);
+                    }
                 }
                 flow.shutdown().await?;
             }
