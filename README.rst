@@ -18,6 +18,7 @@ these days.  I wanted to learn rust, and play with AI... this felt natural.
 
 * what is implemented: 
    * All components, rudimentarily, except poll.
+   * the messages themselves are all wrong... don't try any interop tests. they work with each other for now.
    * All of the configuration options that are implemented, should do the same thing they do in python.
    * options that have not yet had use cases, are not implemented yet.
    * it is kind of essentialist... things needed to run certain use cases are implemented, but many options/details missing.
