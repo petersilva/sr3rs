@@ -9,16 +9,17 @@ use async_trait::async_trait;
 use std::path::Path;
 
 pub mod http;
+pub mod sftp;
 
 #[async_trait]
 pub trait Transfer: Send + Sync {
     async fn get(&self, msg: &Message, local_file: &Path) -> anyhow::Result<u64>;
 }
 
-pub fn get_transfer(scheme: &str, _config: &Config) -> Option<Box<dyn Transfer>> {
+pub fn get_transfer(scheme: &str, config: &Config) -> Option<Box<dyn Transfer>> {
     match scheme {
         "http" | "https" => Some(Box::new(http::HttpTransfer::new())),
-        // "sftp" => Some(Box::new(sftp::SftpTransfer::new(config))),
+        "sftp" => Some(Box::new(sftp::SftpTransfer::new(config))),
         _ => None,
     }
 }
