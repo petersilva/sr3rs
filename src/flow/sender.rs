@@ -47,6 +47,10 @@ impl Flow for SenderFlow {
         self.base.logger.clone()
     }
 
+    fn metrics(&self) -> Arc<Mutex<crate::flow::metrics::Metrics>> {
+        self.base.metrics.clone()
+    }
+
     fn publishers(&self) -> Vec<Arc<Mutex<MothPublisher>>> {
         self.publishers.clone()
     }

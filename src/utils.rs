@@ -124,6 +124,13 @@ pub fn resolve_patterns(pattern: Option<String>) -> Vec<String> {
     results
 }
 
+pub fn detect_component_from_config(config: &crate::Config) -> String {
+    if let Some(ref path) = config.config_search_paths.first() {
+        return detect_component(&path.to_string_lossy());
+    }
+    "subscribe".to_string()
+}
+
 pub fn is_process_running(pid: i32) -> bool {
     if pid <= 0 { return false; }
     unsafe { libc::kill(pid, 0) == 0 }

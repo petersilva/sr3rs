@@ -14,10 +14,12 @@ pub mod subscribe;
 pub mod sender;
 pub mod log;
 pub mod flowcb;
+pub mod metrics;
 
 use crate::flow::log::FlowLog;
 use crate::flow::flowcb::{IncomingCursor, OkCursor, FailedCursor};
 use crate::transfer::get_transfer;
+use crate::flow::metrics::Metrics;
 
 #[derive(Debug, Default)]
 pub struct Worklist {
@@ -58,6 +60,7 @@ impl Worklist {
 pub trait Flow: Send + Sync {
     fn config(&self) -> &Config;
     fn logger(&self) -> Arc<Mutex<FlowLog>>;
+    fn metrics(&self) -> Arc<Mutex<Metrics>>;
     fn publishers(&self) -> Vec<Arc<Mutex<crate::flow::subscribe::MothPublisher>>> { Vec::new() }
     fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> { Vec::new() }
     
@@ -66,6 +69,7 @@ pub trait Flow: Send + Sync {
     async fn filter(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let config = self.config();
         let mut filtered_incoming = Vec::new();
+        let mut rejected_count = 0;
 
         for m in worklist.incoming.drain(..) {
             let url_to_match = format!("{}{}", m.base_url, m.rel_path);
@@ -87,6 +91,7 @@ pub trait Flow: Send + Sync {
                     filtered_incoming.push(msg);
                 } else {
                     worklist.rejected.push(msg);
+                    rejected_count += 1;
                 }
             } else if config.accept_unmatched {
                 let mut msg = m;
@@ -95,7 +100,14 @@ pub trait Flow: Send + Sync {
                 filtered_incoming.push(msg);
             } else {
                 worklist.rejected.push(m);
+                rejected_count += 1;
             }
+        }
+
+        {
+            let metrics_arc = self.metrics();
+            let mut metrics = metrics_arc.lock().await;
+            metrics.flow.msg_count_rejected += rejected_count;
         }
 
         worklist.incoming = filtered_incoming;
@@ -119,12 +131,23 @@ pub trait Flow: Send + Sync {
     async fn work(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let config = self.config();
         if !config.download {
+            let mut count = 0;
             for m in worklist.incoming.drain(..) {
                 ::log::debug!("WORK: download disabled, skipping {}", m.rel_path);
                 worklist.ok.push(m);
+                count += 1;
+            }
+            {
+                let metrics_arc = self.metrics();
+                let mut metrics = metrics_arc.lock().await;
+                metrics.flow.msg_count_out += count;
             }
             return Ok(());
         }
+
+        let mut ok_count = 0;
+        let mut failed_count = 0;
+        let mut bytes_in = 0;
 
         for mut m in worklist.incoming.drain(..) {
             let scheme = match url::Url::parse(&m.base_url) {
@@ -132,6 +155,7 @@ pub trait Flow: Send + Sync {
                 Err(_) => {
                     ::log::error!("WORK: invalid base_url: {}", m.base_url);
                     worklist.failed.push(m);
+                    failed_count += 1;
                     continue;
                 }
             };
@@ -161,17 +185,30 @@ pub trait Flow: Send + Sync {
                         ::log::info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
                         m.fields.insert("size".to_string(), size.to_string());
                         worklist.ok.push(m);
+                        ok_count += 1;
+                        bytes_in += size as u64;
                     }
                     Err(e) => {
                         ::log::error!("WORK: download failed for {}: {}", m.rel_path, e);
                         worklist.failed.push(m);
+                        failed_count += 1;
                     }
                 }
             } else {
                 ::log::error!("WORK: unsupported protocol: {}", scheme);
                 worklist.failed.push(m);
+                failed_count += 1;
             }
         }
+
+        {
+            let metrics_arc = self.metrics();
+            let mut metrics = metrics_arc.lock().await;
+            metrics.flow.msg_count_out += ok_count;
+            metrics.flow.msg_count_failed += failed_count;
+            metrics.flow.byte_count_in += bytes_in;
+        }
+
         Ok(())
     }
 
@@ -182,6 +219,9 @@ pub trait Flow: Send + Sync {
         }
 
         let mut next_ok = Vec::new();
+        let mut failed_count = 0;
+        let mut bytes_out = 0;
+
         for m in worklist.ok.drain(..) {
             let mut failed_indices = Vec::new();
             for (idx, pub_mutex) in publishers.iter().enumerate() {
@@ -193,12 +233,25 @@ pub trait Flow: Send + Sync {
             }
 
             if failed_indices.is_empty() {
+                // Approximate bytes out by calculating size field or payload
+                if let Some(size_str) = m.fields.get("size") {
+                    bytes_out += size_str.parse::<u64>().unwrap_or(0);
+                }
                 next_ok.push(m);
             } else {
                 worklist.failed.push(m);
+                failed_count += 1;
             }
         }
         worklist.ok = next_ok;
+
+        {
+            let metrics_arc = self.metrics();
+            let mut metrics = metrics_arc.lock().await;
+            metrics.flow.msg_count_failed += failed_count;
+            metrics.flow.byte_count_out += bytes_out;
+        }
+
         Ok(())
     }
 
@@ -212,6 +265,13 @@ pub trait Flow: Send + Sync {
             let mut cb = cb_mutex.lock().await;
             cb.gather(worklist).await?;
         }
+
+        {
+            let metrics_arc = self.metrics();
+            let mut metrics = metrics_arc.lock().await;
+            metrics.flow.msg_count_in += worklist.incoming.len() as u64;
+        }
+
         self.filter(worklist).await?;
         let processed_count = worklist.incoming.len() + worklist.ok.len();
         self.accept(worklist).await?;
@@ -310,6 +370,47 @@ pub trait Flow: Send + Sync {
             logger.reset();
         }
 
+        // Collect plugin metrics
+        {
+            let metrics_arc = self.metrics();
+            let mut metrics = metrics_arc.lock().await;
+            metrics.flow.last_housekeeping = chrono::Utc::now();
+            
+            // Get CPU times
+            let ost = unsafe {
+                let mut t: libc::tms = std::mem::zeroed();
+                libc::times(&mut t);
+                t
+            };
+            let clk_tck = unsafe { libc::sysconf(libc::_SC_CLK_TCK) as f64 };
+            metrics.flow.cpu_time_user = ost.tms_utime as f64 / clk_tck;
+            metrics.flow.cpu_time_system = ost.tms_stime as f64 / clk_tck;
+
+            for cb_mutex in self.callbacks() {
+                let cb = cb_mutex.lock().await;
+                metrics.plugins.insert(cb.name().to_string(), cb.metrics_report());
+            }
+
+            // Save metrics to file
+            if let Some(configname) = &self.config().configname {
+                let component = crate::utils::detect_component_from_config(self.config());
+                
+                // Get instance number if we can... default to 1 for now.
+                let instance = 1; // FIXME: get from config or env
+                let metrics_file = crate::config::paths::get_metrics_filename(&component, Some(configname), instance);
+                
+                if let Some(parent) = metrics_file.parent() {
+                    if !parent.exists() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                }
+                
+                if let Ok(json) = serde_json::to_string_pretty(&*metrics) {
+                    let _ = std::fs::write(metrics_file, json);
+                }
+            }
+        }
+
         for cb_mutex in self.callbacks() {
             let cb = cb_mutex.lock().await;
             cb.on_housekeeping(worklist).await?;
@@ -334,6 +435,7 @@ pub trait Flow: Send + Sync {
 pub struct BaseFlow {
     pub config: Config,
     pub logger: Arc<Mutex<FlowLog>>,
+    pub metrics: Arc<Mutex<Metrics>>,
     pub callbacks: Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>>,
 }
 
@@ -352,6 +454,7 @@ impl BaseFlow {
         Self {
             config,
             logger: Arc::new(Mutex::new(FlowLog::new())),
+            metrics: Arc::new(Mutex::new(Metrics::new())),
             callbacks,
         }
     }
@@ -365,6 +468,10 @@ impl Flow for BaseFlow {
 
     fn logger(&self) -> Arc<Mutex<FlowLog>> {
         self.logger.clone()
+    }
+
+    fn metrics(&self) -> Arc<Mutex<Metrics>> {
+        self.metrics.clone()
     }
 
     fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> {

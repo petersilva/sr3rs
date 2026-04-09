@@ -302,8 +302,8 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
-            println!("{:<35} {:<10} {:<10}", "Component/Config", "State", "Processes");
-            println!("{:<35} {:<10} {:<10}", "----------------", "-----", "---------");
+            println!("{:<35} {:<10} {:<10} {:<10} {:<10}", "Component/Config", "State", "Processes", "Msg/s", "Last HK");
+            println!("{:<35} {:<10} {:<10} {:<10} {:<10}", "----------------", "-----", "---------", "-----", "-------");
 
             for config_file in configs {
                 if is_global_config(&config_file) {
@@ -313,7 +313,7 @@ async fn main() -> Result<()> {
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
-                
+
                 let config_loaded = config.load(&config_file).is_ok();
                 let config_finalized = if config_loaded { config.finalize().is_ok() } else { false };
 
@@ -327,12 +327,12 @@ async fn main() -> Result<()> {
 
                 let mut running_count = 0;
                 let expected_count = if config_loaded { config.instances } else { 1 };
-                
+
                 let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
-                let state_file = state_dir.join("instances_expected");
-                
-                let instances_requested = if state_file.exists() {
-                    std::fs::read_to_string(state_file).ok().and_then(|s| s.parse().ok()).unwrap_or(0)
+                let instances_requested_file = state_dir.join("instances_expected");
+
+                let instances_requested = if instances_requested_file.exists() {
+                    std::fs::read_to_string(instances_requested_file).ok().and_then(|s| s.parse().ok()).unwrap_or(0)
                 } else {
                     0
                 };
@@ -378,9 +378,52 @@ async fn main() -> Result<()> {
                     state = format!("{} (ERR)", state);
                 }
 
+                // Try to read metrics
+                let mut msg_rate = "-".to_string();
+                let mut last_hk = "-".to_string();
+
+                if let Some(ref c_name) = config_name {
+                    for i in 1..=100 {
+                        let metrics_file = paths::get_metrics_filename(&comp, Some(c_name), i);
+                        if metrics_file.exists() {
+                            if let Ok(content) = std::fs::read_to_string(metrics_file) {
+                                if let Ok(metrics) = serde_json::from_str::<serde_json::Value>(&content) {
+                                    if let Some(flow) = metrics.get("flow") {
+                                        if let (Some(msg_out), Some(start_time_str)) = (flow.get("msg_count_out"), flow.get("start_time")) {
+                                            let msg_count = msg_out.as_u64().unwrap_or(0);
+                                            if let Ok(start_time) = chrono::DateTime::parse_from_rfc3339(start_time_str.as_str().unwrap_or("")) {
+                                                let duration = chrono::Utc::now().signed_duration_since(start_time);
+                                                let secs = duration.num_seconds().max(1);
+                                                msg_rate = format!("{:.2}", msg_count as f64 / secs as f64);
+                                            }
+                                        }
+                                        if let Some(last_hk_str) = flow.get("last_housekeeping") {
+                                             if let Ok(last_hk_dt) = chrono::DateTime::parse_from_rfc3339(last_hk_str.as_str().unwrap_or("")) {
+                                                 let duration = chrono::Utc::now().signed_duration_since(last_hk_dt);
+                                                 let secs = duration.num_seconds();
+                                                 if secs < 60 {
+                                                     last_hk = format!("{}s", secs);
+                                                 } else if secs < 3600 {
+                                                     last_hk = format!("{}m", secs / 60);
+                                                 } else {
+                                                     last_hk = format!("{}h", secs / 3600);
+                                                 }
+                                             }
+                                        }
+                                    }
+                                }
+                            }
+                            break; 
+                        } else if i > expected_count && i > 10 {
+                            break;
+                        }
+                    }
+                }
+
                 let name = format!("{}/{}", comp, config_name.as_deref().unwrap_or("unknown"));
-                println!("{:<35} {:<10} {}/{}", name, state, running_count, expected_count);
+                println!("{:<35} {:<10} {:<10} {:<10} {:<10}", name, state, format!("{}/{}", running_count, expected_count), msg_rate, last_hk);
             }
+
             println!();
         }
         Commands::Enable { config_pattern } => {

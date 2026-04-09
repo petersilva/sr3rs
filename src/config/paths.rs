@@ -47,11 +47,14 @@ pub fn get_pid_filename(component: &str, configuration: Option<&str>, instance: 
         .join(format!("{}_{}_{:02}.pid", component, config_part, instance))
 }
 
+pub fn get_metrics_dir() -> PathBuf {
+    get_user_cache_dir().join("metrics")
+}
+
 pub fn get_metrics_filename(component: &str, configuration: Option<&str>, instance: u32) -> PathBuf {
-    let metrics_dir = get_user_cache_dir().join("metrics");
     let config_part = configuration
         .map(|c| format!("_{}", c.trim_end_matches(".conf")))
         .unwrap_or_default();
     
-    metrics_dir.join(format!("{}{}_{:02}.json", component, config_part, instance))
+    get_metrics_dir().join(format!("{}{}_{:02}.json", component, config_part, instance))
 }

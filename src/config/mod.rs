@@ -98,6 +98,9 @@ pub struct Config {
     pub force_polling: bool,
     pub identity_method: String,
     pub post_paths: Vec<String>,
+    pub memory_max: u64,
+    pub memory_baseline_file: u32,
+    pub memory_multiplier: f64,
 
     pub flow_callbacks: Vec<String>,
 
@@ -164,6 +167,9 @@ impl Default for Config {
             force_polling: false,
             identity_method: "sha512".to_string(),
             post_paths: Vec::new(),
+            memory_max: 0,
+            memory_baseline_file: 100,
+            memory_multiplier: 3.0,
 
             flow_callbacks: Vec::new(),
 
