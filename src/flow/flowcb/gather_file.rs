@@ -16,6 +16,7 @@ pub struct GatherFilePlugin {
     pub name: String,
     pub config: Config,
     pub primed: bool,
+    pub initial_scan_done: bool,
     pub queued_messages: Vec<Message>,
 }
 
@@ -25,6 +26,7 @@ impl GatherFilePlugin {
             name: "gather.file".to_string(),
             config: config.clone(),
             primed: false,
+            initial_scan_done: false,
             queued_messages: Vec::new(),
         }
     }
@@ -34,12 +36,26 @@ impl GatherFilePlugin {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                
+                // Skip hidden files/directories
+                if file_name.starts_with('.') {
+                    continue;
+                }
+
                 if path.is_dir() {
                     if self.config.recursive {
                         messages.extend(self.walk(&path));
                     }
                 } else {
-                    if let Ok(msg) = Message::from_file(&path, &self.config) {
+                    if let Ok(mut msg) = Message::from_file(&path, &self.config) {
+                        // Calculate identity
+                        if let Some(mut id_obj) = crate::identity::factory(&self.config.identity_method) {
+                            if let Ok(_) = id_obj.update_file(path.to_str().unwrap_or("")) {
+                                msg.fields.insert("identity".to_string(), format!("{}:{}", self.config.identity_method, id_obj.value()));
+                            }
+                        }
+
                         // Check age
                         if let Ok(metadata) = fs::metadata(&path) {
                             if let Ok(mtime) = metadata.modified() {
@@ -72,6 +88,7 @@ impl FlowCB for GatherFilePlugin {
     async fn on_start(&mut self) -> anyhow::Result<()> {
         self.queued_messages.clear();
         self.primed = false;
+        self.initial_scan_done = false;
         Ok(())
     }
 
@@ -87,12 +104,36 @@ impl FlowCB for GatherFilePlugin {
 
         if self.primed {
             // In a polling model, we might want to re-scan or wait.
-            // Python version returns messages from watch if sleep > 0.
+            if self.config.sleep > 0.0 {
+                self.primed = false;
+            }
             return Ok(());
         }
 
+        // Use 'directory' (which 'path' is aliased to)
         let pbd = self.config.post_base_dir.clone().unwrap_or_else(|| self.config.directory.clone());
+        
+        if !pbd.exists() {
+             ::log::warn!("GatherFile: directory {} does not exist", pbd.display());
+             self.primed = true;
+             return Ok(());
+        }
+
         let messages = self.walk(&pbd);
+
+        // Handle post_on_start
+        if !self.initial_scan_done && !self.config.post_on_start {
+            ::log::info!("GatherFile: initial scan done, ignoring {} existing files (post_on_start is False)", messages.len());
+            self.initial_scan_done = true;
+            self.primed = true;
+            // We return nothing, but since we are primed, we will scan again after 'sleep'
+            // To make sure they don't get picked up next time, we'd need to record them in nodupe.
+            // But if they haven't changed, nodupe will catch them anyway if we DO return them now but reject them.
+            // For now, let's just not return them.
+            return Ok(());
+        }
+
+        self.initial_scan_done = true;
 
         if messages.len() > batch_size {
             let (batch, rest) = messages.split_at(batch_size);

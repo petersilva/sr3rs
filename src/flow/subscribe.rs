@@ -166,6 +166,10 @@ impl Flow for SubscribeFlow {
         self.publishers.clone()
     }
 
+    fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> {
+        self.base.callbacks.clone()
+    }
+
     async fn cleanup(&self) -> anyhow::Result<()> {
         log::info!("Cleaning up broker resources for {}", self.base.config.configname.as_deref().unwrap_or("unknown"));
         

@@ -83,7 +83,7 @@ impl DiskNoDupePlugin {
 
         let kdict = state.cache_dict.get_mut(key).unwrap();
         let present = if let Some(t) = kdict.get(relpath) {
-            *t + state.nodupe_ttl >= now
+            *t + state.nodupe_ttl as f64 >= now
         } else {
             false
         };
@@ -97,10 +97,10 @@ impl DiskNoDupePlugin {
 
         if present {
             ::log::debug!("updated time of old NoDupe entry: relpath={}", relpath);
-            false
+            false // It IS in cache, so not_in_cache is false.
         } else {
             ::log::debug!("added relpath={}", relpath);
-            true
+            true // It is NOT in cache (or expired), so not_in_cache is true.
         }
     }
 

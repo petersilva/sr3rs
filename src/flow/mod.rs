@@ -100,15 +100,15 @@ pub trait Flow: Send + Sync {
 
         worklist.incoming = filtered_incoming;
         
+        for cb_mutex in self.callbacks() {
+            let cb = cb_mutex.lock().await;
+            cb.after_accept(worklist).await?;
+        }
+
         {
             let logger_arc = self.logger();
             let mut logger = logger_arc.lock().await;
             logger.after_accept(config, worklist);
-        }
-
-        for cb_mutex in self.callbacks() {
-            let cb = cb_mutex.lock().await;
-            cb.after_accept(worklist).await?;
         }
 
         Ok(())
@@ -216,15 +216,16 @@ pub trait Flow: Send + Sync {
         let processed_count = worklist.incoming.len() + worklist.ok.len();
         self.accept(worklist).await?;
         self.work(worklist).await?;
-        {
-            let logger_arc = self.logger();
-            let mut logger = logger_arc.lock().await;
-            logger.after_work(self.config(), worklist);
-        }
 
         for cb_mutex in self.callbacks() {
             let cb = cb_mutex.lock().await;
             cb.after_work(worklist).await?;
+        }
+
+        {
+            let logger_arc = self.logger();
+            let mut logger = logger_arc.lock().await;
+            logger.after_work(self.config(), worklist);
         }
 
         self.post(worklist).await?;

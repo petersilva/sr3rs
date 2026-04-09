@@ -94,6 +94,8 @@ pub struct Config {
     pub sleep: f64,
     pub perm_default: u32,
     pub perm_dir_default: u32,
+    pub post_on_start: bool,
+    pub identity_method: String,
 
     pub flow_callbacks: Vec<String>,
 
@@ -155,7 +157,9 @@ impl Default for Config {
             timeout: 300,
             sleep: 0.1,
             perm_default: 0,
-            perm_dir_default: 0o775,
+            perm_dir_default: 0,
+            post_on_start: false,
+            identity_method: "sha512".to_string(),
 
             flow_callbacks: Vec::new(),
 
@@ -262,27 +266,45 @@ impl Config {
                 self.nodupe_ttl = 7 * 3600;
                 self.perm_default = 0o400;
                 self.sleep = 5.0;
+                self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("retry".to_string());
             }
             "subscribe" => {
                 self.download = true;
                 self.mirror = false;
+                self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("retry".to_string());
             }
-            "sarra" | "sender" => {
+            "sarra" => {
                 self.download = true;
+                self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("retry".to_string());
+            }
+            "sender" => {
+                self.download = true;
+                self.flow_callbacks.push("retry".to_string());
             }
             "post" | "cpost" => {
                 self.download = false;
                 self.sleep = -1.0;
+                self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("retry".to_string());
             }
             "watch" => {
                 self.download = false;
                 self.sleep = 5.0;
+                self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("file".to_string());
+                self.flow_callbacks.push("retry".to_string());
             }
             "shovel" | "cpump" | "report"  => {
                 self.download = false;
+                self.flow_callbacks.push("retry".to_string());
             }
             "winnow" => {
                 self.nodupe_ttl = 300;
+                self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("retry".to_string());
             }
             _ => {}
         }
@@ -398,7 +420,7 @@ impl Config {
                     }
                     Ok(())
                 }
-                "directory" => {
+                "directory" | "path" => {
                     if let Some(ref val) = v {
                         self.directory = PathBuf::from(val);
                     }
@@ -596,6 +618,18 @@ impl Config {
                 "permDirDefault" | "chmod_dir" => {
                     if let Some(ref val) = v {
                         self.perm_dir_default = parse_octal(val);
+                    }
+                    Ok(())
+                }
+                "post_on_start" => {
+                    if let Some(ref val) = v {
+                        self.post_on_start = is_true(val);
+                    }
+                    Ok(())
+                }
+                "identity" => {
+                    if let Some(ref val) = v {
+                        self.identity_method = val.to_string();
                     }
                     Ok(())
                 }
