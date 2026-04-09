@@ -36,12 +36,6 @@ impl GatherFilePlugin {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                
-                // Skip hidden files/directories
-                if file_name.starts_with('.') {
-                    continue;
-                }
 
                 if path.is_dir() {
                     if self.config.recursive {
