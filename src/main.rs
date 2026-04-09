@@ -192,7 +192,14 @@ async fn main() -> Result<()> {
                 if is_global_config(&config_file) {
                     continue;
                 }
+                
                 let comp = detect_component(&config_file);
+                // Skip interactive components for start command
+                if comp == "post" || comp == "cpost" {
+                    log::info!("Skipping start for interactive component: {} ({})", comp, config_file);
+                    continue;
+                }
+
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
                 if let Err(e) = config.load(&config_file) {
@@ -373,13 +380,19 @@ async fn main() -> Result<()> {
                 let mut state = if state_dir.join("disabled").exists() {
                     "DISABLED".to_string()
                 } else if instances_requested == 0 && running_count == 0 {
-                    if state_exists {
+                    if comp == "post" || comp == "cpost" {
+                        "INTER".to_string()
+                    } else if state_exists {
                         "STOPPED".to_string()
                     } else {
                         "NEW".to_string()
                     }
                 } else if running_count == 0 {
-                    "STOPPED".to_string()
+                    if comp == "post" || comp == "cpost" {
+                        "INTER".to_string()
+                    } else {
+                        "STOPPED".to_string()
+                    }
                 } else if running_count < instances_requested {
                     "PARTIAL".to_string()
                 } else {
