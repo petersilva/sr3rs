@@ -97,6 +97,7 @@ pub struct Config {
     pub post_on_start: bool,
     pub force_polling: bool,
     pub identity_method: String,
+    pub post_paths: Vec<String>,
 
     pub flow_callbacks: Vec<String>,
 
@@ -162,6 +163,7 @@ impl Default for Config {
             post_on_start: false,
             force_polling: false,
             identity_method: "sha512".to_string(),
+            post_paths: Vec::new(),
 
             flow_callbacks: Vec::new(),
 

@@ -6,11 +6,8 @@
 use clap::{Parser, Subcommand};
 use sr3rs::Config;
 use sr3rs::flow::{Flow, Worklist, subscribe::SubscribeFlow, sender::SenderFlow};
-use sr3rs::message::Message;
 use sr3rs::config::paths;
 use sr3rs::utils::{setup_logging, detect_component, resolve_patterns, is_process_running, is_global_config};
-use sr3rs::flow::flowcb::gather_file::GatherFilePlugin;
-use std::path::Path;
 use anyhow::Result;
 use std::io::Write;
 use std::process::Command;
@@ -648,45 +645,14 @@ async fn main() -> Result<()> {
                 config_obj.load(&config_file)?;
                 config_obj.finalize()?;
 
+                // Pass the files from CLI to the gather plugin via config
+                config_obj.post_paths = files.clone();
+
                 let mut flow = SubscribeFlow::new(config_obj);
-
-                let gather_file = GatherFilePlugin::new(flow.config());
                 let mut worklist = Worklist::new();
-                for file_path_str in &files {
-                    let file_path = Path::new(file_path_str);
-                    if file_path.is_dir() {
-                        log::info!("Scanning directory: {}", file_path_str);
-                        let msgs = gather_file.walk(file_path);
-                        log::info!("Found {} files in directory: {}", msgs.len(), file_path_str);
-                        worklist.incoming.extend(msgs);
-                    } else {
-                        match Message::from_file(file_path, flow.config()) {
-                            Ok(msg) => {
-                                log::info!("Queuing notification for: {}", file_path_str);
-                                worklist.incoming.push(msg);
-                            }
-                            Err(e) => log::error!("Failed to build message for {}: {}", file_path_str, e),
-                        }
-                    }
-                }
-
-                if !worklist.incoming.is_empty() {
-                    let total_found = worklist.incoming.len();
-                    flow.filter(&mut worklist).await?;
-                    
-                    if !worklist.rejected.is_empty() {
-                        log::info!("Rejected {} files according to configuration.", worklist.rejected.len());
-                    }
-
-                    // Move remaining accepted messages to ok for posting
-                    worklist.ok.extend(worklist.incoming.drain(..));
-
-                    if !worklist.ok.is_empty() {
-                        flow.connect().await?;
-                        flow.post(&mut worklist).await?;
-                        log::info!("Successfully announced {} files (out of {} found) using {}.", worklist.ok.len(), total_found, config_file);
-                    }
-                }
+                
+                flow.connect().await?;
+                flow.run_once(&mut worklist).await?;
                 flow.shutdown().await?;
             }
         }

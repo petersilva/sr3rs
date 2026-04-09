@@ -39,6 +39,13 @@ impl GatherFilePlugin {
 
     pub fn walk(&self, dir: &Path) -> Vec<Message> {
         let mut messages = Vec::new();
+        if dir.is_file() {
+            if let Ok(msg) = self.make_message(dir) {
+                messages.push(msg);
+            }
+            return messages;
+        }
+
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -162,30 +169,38 @@ impl FlowCB for GatherFilePlugin {
 
         // 2. Initial scan or polling scan
         if !self.initial_scan_done || (self.watcher.is_none() && !self.primed) {
-             let pbd = self.config.post_base_dir.clone().unwrap_or_else(|| self.config.directory.clone());
-             if pbd.exists() {
-                 let messages = self.walk(&pbd);
-
-                 if !self.initial_scan_done && !self.config.post_on_start {
-                     ::log::info!("GatherFile: initial scan done, ignoring {} existing files (post_on_start is False)", messages.len());
-                     self.initial_scan_done = true;
-                     self.primed = true;
-                     return Ok(());
+             let mut messages = Vec::new();
+             
+             if !self.initial_scan_done && !self.config.post_paths.is_empty() {
+                 for path_str in &self.config.post_paths {
+                     messages.extend(self.walk(Path::new(path_str)));
                  }
+             } else {
+                 let pbd = self.config.post_base_dir.clone().unwrap_or_else(|| self.config.directory.clone());
+                 if pbd.exists() {
+                     messages = self.walk(&pbd);
+                 }
+             }
 
+             if !self.initial_scan_done && !self.config.post_on_start && self.config.post_paths.is_empty() {
+                 ::log::info!("GatherFile: initial scan done, ignoring {} existing files (post_on_start is False)", messages.len());
                  self.initial_scan_done = true;
-                 
-                 if !messages.is_empty() {
-                    if messages.len() > batch_size {
-                        let (batch, rest) = messages.split_at(batch_size);
-                        worklist.incoming.extend(batch.iter().cloned());
-                        self.queued_messages.extend(rest.iter().cloned());
-                    } else {
-                        worklist.incoming.extend(messages);
-                    }
-                    self.primed = true;
-                    return Ok(());
-                 }
+                 self.primed = true;
+                 return Ok(());
+             }
+
+             self.initial_scan_done = true;
+             
+             if !messages.is_empty() {
+                if messages.len() > batch_size {
+                    let (batch, rest) = messages.split_at(batch_size);
+                    worklist.incoming.extend(batch.iter().cloned());
+                    self.queued_messages.extend(rest.iter().cloned());
+                } else {
+                    worklist.incoming.extend(messages);
+                }
+                self.primed = true;
+                return Ok(());
              }
         }
 
