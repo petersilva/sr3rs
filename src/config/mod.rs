@@ -103,6 +103,10 @@ pub struct Config {
     pub memory_multiplier: f64,
     pub statehost: bool,
     pub host_dir: Option<String>,
+    pub scheduled_interval: u32,
+    pub scheduled_hour: Vec<String>,
+    pub scheduled_minute: Vec<String>,
+    pub scheduled_time: Vec<String>,
 
     pub flow_callbacks: Vec<String>,
 
@@ -174,6 +178,10 @@ impl Default for Config {
             memory_multiplier: 3.0,
             statehost: false,
             host_dir: None,
+            scheduled_interval: 0,
+            scheduled_hour: Vec::new(),
+            scheduled_minute: Vec::new(),
+            scheduled_time: Vec::new(),
 
             flow_callbacks: Vec::new(),
 
@@ -651,6 +659,30 @@ impl Config {
                 "statehost" => {
                     if let Some(ref val) = v {
                         self.statehost = is_true(val);
+                    }
+                    Ok(())
+                }
+                "scheduled_interval" => {
+                    if let Some(ref val) = v {
+                        self.scheduled_interval = parse_duration(val);
+                    }
+                    Ok(())
+                }
+                "scheduled_hour" => {
+                    if let Some(ref val) = v {
+                        self.scheduled_hour.push(val.to_string());
+                    }
+                    Ok(())
+                }
+                "scheduled_minute" => {
+                    if let Some(ref val) = v {
+                        self.scheduled_minute.push(val.to_string());
+                    }
+                    Ok(())
+                }
+                "scheduled_time" => {
+                    if let Some(ref val) = v {
+                        self.scheduled_time.push(val.to_string());
                     }
                     Ok(())
                 }

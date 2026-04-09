@@ -15,7 +15,7 @@ This is a proof of concept for now.
    * state files are under ~/.cache/sr3rs.
 
 * what is implemented: 
-   * All components, rudimentarily, except poll.
+   * All components, rudimentarily
    * the messages themselves are all wrong... don't try any interop tests. they work with each other for now.
    * All of the configuration options that are implemented, should do the same thing they do in python.
    * options that have not yet had use cases, are not implemented yet.
