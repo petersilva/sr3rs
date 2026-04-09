@@ -260,24 +260,27 @@ impl Config {
                 self.nodupe_ttl = 7 * 3600;
                 self.perm_default = 0o400;
                 self.sleep = 5.0;
-                self.mirror = true;
             }
-            "subscribe" | "sarra" | "sender" | "cpump" | "cpost" | "report" => {
+            "subscribe" => {
                 self.download = true;
                 self.mirror = false;
             }
-            "post" | "watch" => {
+            "sarra" | "sender" => {
+                self.download = true;
+            }
+            "post" | "cpost" => {
                 self.download = false;
-                self.mirror = true;
+                self.sleep = -1.0;
+            }
+            "watch" => {
+                self.download = false;
                 self.sleep = 5.0;
             }
-            "shovel" => {
+            "shovel" | "cpump" | "report"  => {
                 self.download = false;
-                self.mirror = false;
             }
             "winnow" => {
                 self.nodupe_ttl = 300;
-                self.mirror = true;
             }
             _ => {}
         }
