@@ -95,6 +95,7 @@ pub struct Config {
     pub perm_default: u32,
     pub perm_dir_default: u32,
     pub post_on_start: bool,
+    pub force_polling: bool,
     pub identity_method: String,
 
     pub flow_callbacks: Vec<String>,
@@ -159,6 +160,7 @@ impl Default for Config {
             perm_default: 0,
             perm_dir_default: 0,
             post_on_start: false,
+            force_polling: false,
             identity_method: "sha512".to_string(),
 
             flow_callbacks: Vec::new(),
@@ -624,6 +626,12 @@ impl Config {
                 "post_on_start" => {
                     if let Some(ref val) = v {
                         self.post_on_start = is_true(val);
+                    }
+                    Ok(())
+                }
+                "force_polling" => {
+                    if let Some(ref val) = v {
+                        self.force_polling = is_true(val);
                     }
                     Ok(())
                 }
