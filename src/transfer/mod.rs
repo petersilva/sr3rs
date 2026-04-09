@@ -10,6 +10,7 @@ use std::path::Path;
 
 pub mod http;
 pub mod sftp;
+pub mod ftp;
 
 #[async_trait]
 pub trait Transfer: Send + Sync {
@@ -21,6 +22,7 @@ pub fn get_transfer(scheme: &str, config: &Config) -> Option<Box<dyn Transfer>> 
     match scheme {
         "http" | "https" => Some(Box::new(http::HttpTransfer::new())),
         "sftp" => Some(Box::new(sftp::SftpTransfer::new(config))),
+        "ftp" | "ftps" => Some(Box::new(ftp::FtpTransfer::new(config))),
         _ => None,
     }
 }
