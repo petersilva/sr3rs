@@ -208,7 +208,9 @@ impl Config {
                 self.config_search_paths.insert(0, parent.to_path_buf());
             }
         }
-        self.read_file(path.to_str().unwrap())
+        self.read_file(path.to_str().unwrap())?;
+        self.save_state()?;
+        Ok(())
     }
 
     fn resolve_config_path(&self, input: &str) -> Result<PathBuf, ConfigError> {
@@ -907,6 +909,7 @@ impl Config {
             }
         }
 
+        self.save_state()?;
         Ok(())
     }
 

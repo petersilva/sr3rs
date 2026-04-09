@@ -5,14 +5,9 @@
 
 use std::path::PathBuf;
 use directories::ProjectDirs;
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref DIRS: Option<ProjectDirs> = ProjectDirs::from("ca.gc.science", "sarracenia", "sr3rs");
-}
 
 pub fn get_user_cache_dir() -> PathBuf {
-    DIRS.as_ref()
+    ProjectDirs::from("ca.gc.science", "sarracenia", "sr3rs")
         .map(|d| d.cache_dir().to_path_buf())
         .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -21,7 +16,7 @@ pub fn get_user_cache_dir() -> PathBuf {
 }
 
 pub fn get_user_config_dir() -> PathBuf {
-    DIRS.as_ref()
+    ProjectDirs::from("ca.gc.science", "sarracenia", "sr3rs")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
