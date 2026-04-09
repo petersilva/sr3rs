@@ -1,0 +1,23 @@
+
+
+The thing that wrote the code is Gemini-AI
+
+Guided by Peter Silva, lots of guidance.
+https://github.com/MetPX/sarracenia/commits?author=petersilva
+It is a proof of concept for Peter to learn some rust and AI at the same time.
+
+The implementation method was to tell Gemini to re-implement the python version, ( https://github.com/MetPX/sarracenia )
+copying the design, in Rust. Proceeding iteratively from a small core, towards a reasonable subset.
+Lots of copying of tests from there also. So realistically, everyone who contributed to the Python
+version also contributed to this one, since it is a copy.
+
+https://github.com/MetPX/sarracenia/blob/development/AUTHORS.rst
+
+The design for the plugin architecture was developed using Chat-GPT, and then 
+the outline that resulted was fed to Gemini for implementation. The intent for the licensing is, 
+like the python implementation it is based on, for any contributors to retain the copyright 
+for their contributions, under the copyright of the whole to be GPLv2.
+
+Change of license would require agreement of all 
+
+For now, there is only one contributor.
