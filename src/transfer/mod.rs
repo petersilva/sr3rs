@@ -11,6 +11,7 @@ use std::path::Path;
 pub mod http;
 pub mod sftp;
 pub mod ftp;
+pub mod file;
 
 #[async_trait]
 pub trait Transfer: Send + Sync {
@@ -23,6 +24,7 @@ pub fn get_transfer(scheme: &str, config: &Config) -> Option<Box<dyn Transfer>> 
         "http" | "https" => Some(Box::new(http::HttpTransfer::new())),
         "sftp" => Some(Box::new(sftp::SftpTransfer::new(config))),
         "ftp" | "ftps" => Some(Box::new(ftp::FtpTransfer::new(config))),
+        "file" => Some(Box::new(file::FileTransfer::new(config))),
         _ => None,
     }
 }

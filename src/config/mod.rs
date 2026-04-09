@@ -302,9 +302,10 @@ impl Config {
                 self.download = false;
                 self.sleep = -1.0;
                 self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("file".to_string());
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
-            }
-            "watch" => {
+            }            "watch" => {
                 self.download = false;
                 self.sleep = 5.0;
                 self.flow_callbacks.push("nodupe".to_string());

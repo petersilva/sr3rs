@@ -266,14 +266,15 @@ pub trait Flow: Send + Sync {
             cb.gather(worklist).await?;
         }
 
+        let gathered_count = worklist.incoming.len();
+
         {
             let metrics_arc = self.metrics();
             let mut metrics = metrics_arc.lock().await;
-            metrics.flow.msg_count_in += worklist.incoming.len() as u64;
+            metrics.flow.msg_count_in += gathered_count as u64;
         }
 
         self.filter(worklist).await?;
-        let processed_count = worklist.incoming.len() + worklist.ok.len();
         self.accept(worklist).await?;
         self.work(worklist).await?;
 
@@ -290,7 +291,7 @@ pub trait Flow: Send + Sync {
 
         self.post(worklist).await?;
         self.ack(worklist).await?;
-        Ok(processed_count)
+        Ok(gathered_count)
     }
 
     async fn run(&self) -> anyhow::Result<()> {

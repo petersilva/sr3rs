@@ -104,6 +104,11 @@ impl GatherFilePlugin {
             return Ok(());
         }
 
+        // If sleep < 0 (interactive post), don't start a watcher.
+        if self.config.sleep < 0.0 {
+            return Ok(());
+        }
+
         let (tx, rx) = mpsc::channel(100);
         let tx_clone = tx.clone();
 
@@ -173,8 +178,15 @@ impl FlowCB for GatherFilePlugin {
              
              if !self.initial_scan_done && !self.config.post_paths.is_empty() {
                  for path_str in &self.config.post_paths {
-                     messages.extend(self.walk(Path::new(path_str)));
+                     let p = Path::new(path_str);
+                     if p.exists() {
+                        ::log::info!("GatherFile: scanning path from CLI: {}", path_str);
+                        messages.extend(self.walk(p));
+                     } else {
+                        ::log::warn!("GatherFile: CLI path does not exist: {}", path_str);
+                     }
                  }
+                 ::log::info!("GatherFile: found {} files in CLI paths.", messages.len());
              } else {
                  let pbd = self.config.post_base_dir.clone().unwrap_or_else(|| self.config.directory.clone());
                  if pbd.exists() {

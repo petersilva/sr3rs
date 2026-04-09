@@ -717,11 +717,21 @@ async fn main() -> Result<()> {
                 config_obj.post_paths = files.clone();
 
                 let mut flow = SubscribeFlow::new(config_obj);
-                let mut worklist = Worklist::new();
+                let mut total_announced = 0;
+                let mut total_found = 0;
                 
                 flow.connect().await?;
-                flow.run_once(&mut worklist).await?;
+                loop {
+                    let mut worklist = Worklist::new();
+                    let count = flow.run_once(&mut worklist).await?;
+                    if count == 0 {
+                        break;
+                    }
+                    total_found += count;
+                    total_announced += worklist.ok.len();
+                }
                 flow.shutdown().await?;
+                log::info!("Successfully announced {} files (out of {} found) using {}.", total_announced, total_found, config_file);
             }
         }
         Commands::RunInstance { component, config_file, instance } => {
