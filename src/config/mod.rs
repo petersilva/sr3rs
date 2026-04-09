@@ -101,6 +101,7 @@ pub struct Config {
     pub config_search_paths: Vec<PathBuf>,
     pub rand4: String,
     pub rand8: String,
+    pub send_to: Option<String>,
 }
 
 impl Default for Config {
@@ -162,6 +163,7 @@ impl Default for Config {
             config_search_paths: vec![PathBuf::from(".")],
             rand4: format!("{:04x}", r4),
             rand8: format!("{:08x}", r8),
+            send_to: None,
         }
     }
 }
@@ -429,6 +431,12 @@ impl Config {
                 "instances" => {
                     if let Some(ref val) = v {
                         self.instances = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "sendTo" => {
+                    if let Some(ref val) = v {
+                        self.send_to = Some(val.to_string());
                     }
                     Ok(())
                 }

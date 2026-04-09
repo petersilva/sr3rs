@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 pub mod subscribe;
+pub mod sender;
 pub mod log;
 pub mod flowcb;
 

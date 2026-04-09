@@ -5,7 +5,7 @@
 
 use clap::{Parser, Subcommand};
 use sr3rs::Config;
-use sr3rs::flow::{Flow, subscribe::SubscribeFlow, Worklist};
+use sr3rs::flow::{Flow, Worklist, subscribe::SubscribeFlow, sender::SenderFlow};
 use sr3rs::message::Message;
 use sr3rs::config::paths;
 use sr3rs::utils::{setup_logging, detect_component, resolve_patterns, is_process_running, is_global_config};
@@ -173,7 +173,12 @@ async fn main() -> Result<()> {
             });
 
             match component.as_str() {
-                "subscribe" | "shovel" | "post" | "sarra" | "report" | "sender" | "poll" | "watch" | "winnow" | "cpost" | "cpump" => {
+                "sender" => {
+                    let mut flow = SenderFlow::new(config);
+                    flow.connect_full(true, true).await?;
+                    flow.run_with_shutdown(token).await?;
+                }
+                "subscribe" | "shovel" | "post" | "sarra" | "report" | "poll" | "watch" | "winnow" | "cpost" | "cpump" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
                     flow.run_with_shutdown(token).await?;
@@ -528,16 +533,30 @@ async fn main() -> Result<()> {
                 }
 
                 // Now cleanup broker resources
-                let mut flow = SubscribeFlow::new(config);
-                if let Err(e) = flow.connect_full(false, false).await {
-                    log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
-                } else {
-                    if let Err(e) = flow.cleanup().await {
-                        log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
+                match comp.as_str() {
+                    "sender" => {
+                        let mut flow = SenderFlow::new(config);
+                        if let Err(e) = flow.connect_full(false, false).await {
+                            log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
+                        } else {
+                            if let Err(e) = flow.cleanup().await {
+                                log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
+                            }
+                            flow.shutdown().await?;
+                        }
                     }
-                    flow.shutdown().await?;
+                    _ => {
+                        let mut flow = SubscribeFlow::new(config);
+                        if let Err(e) = flow.connect_full(false, false).await {
+                            log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
+                        } else {
+                            if let Err(e) = flow.cleanup().await {
+                                log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
+                            }
+                            flow.shutdown().await?;
+                        }
+                    }
                 }
-                println!("Cleanup complete for {}.", config_file);
             }
         }
         Commands::Edit { config_pattern } => {
@@ -594,7 +613,15 @@ async fn main() -> Result<()> {
                 }
 
                 match component.as_str() {
-                    "subscribe" | "shovel" | "post" | "cpost" | "cpump" | "poll" | "report" | "sarra" | "sender" | "watch" | "winnow" => {
+                    "sender" => {
+                        let mut flow = SenderFlow::new(config);
+                        if let Err(e) = flow.connect_full(true, false).await {
+                            log::error!("Failed to connect for {}: {}", config_file, e);
+                            continue;
+                        }
+                        flow.shutdown().await?;
+                    }
+                    "subscribe" | "shovel" | "post" | "cpost" | "cpump" | "poll" | "report" | "sarra" | "watch" | "winnow" => {
                         let mut flow = SubscribeFlow::new(config);
                         if let Err(e) = flow.connect().await {
                             log::error!("Failed to connect for {}: {}", config_file, e);
@@ -698,7 +725,12 @@ async fn main() -> Result<()> {
             });
 
             let res = match component.as_str() {
-                "subscribe" | "shovel" | "post" | "sarra" | "report" | "sender" | "poll" | "watch" | "winnow" | "cpost" | "cpump" => {
+                "sender" => {
+                    let mut flow = SenderFlow::new(config);
+                    flow.connect_full(true, true).await?;
+                    flow.run_with_shutdown(token).await
+                }
+                "subscribe" | "shovel" | "post" | "sarra" | "report" | "poll" | "watch" | "winnow" | "cpost" | "cpump" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
                     flow.run_with_shutdown(token).await

@@ -51,4 +51,8 @@ impl Transfer for HttpTransfer {
         file.flush().await?;
         Ok(downloaded)
     }
+
+    async fn put(&self, _msg: &Message, _local_file: &Path, _remote_file: &str) -> anyhow::Result<u64> {
+        anyhow::bail!("HTTP PUT not implemented")
+    }
 }

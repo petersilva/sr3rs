@@ -23,9 +23,9 @@ impl SftpTransfer {
         }
     }
 
-    fn connect(&self, msg: &Message) -> anyhow::Result<Session> {
-        let url = url::Url::parse(&msg.base_url)?;
-        let host = url.host_str().ok_or_else(|| anyhow::anyhow!("No host in base_url"))?;
+    fn connect_to(&self, url_str: &str) -> anyhow::Result<Session> {
+        let url = url::Url::parse(url_str)?;
+        let host = url.host_str().ok_or_else(|| anyhow::anyhow!("No host in URL: {}", url_str))?;
         let port = url.port().unwrap_or(22);
         let user = url.username();
         let password = url.password();
@@ -37,7 +37,7 @@ impl SftpTransfer {
 
         // Try to find credentials if not in URL
         let (final_user, final_pass) = if user.is_empty() || password.is_none() {
-            if let Some(cred) = self.config.credentials.get(&msg.base_url) {
+            if let Some(cred) = self.config.credentials.get(url_str) {
                 (cred.url.username().to_string(), cred.url.password().map(|s| s.to_string()))
             } else {
                 (user.to_string(), password.map(|s| s.to_string()))
@@ -66,11 +66,11 @@ impl Transfer for SftpTransfer {
     async fn get(&self, msg: &Message, local_file: &Path) -> anyhow::Result<u64> {
         let rel_path = msg.rel_path.clone();
         let local_path = local_file.to_path_buf();
+        let base_url = msg.base_url.clone();
         
-        // Since ssh2 is blocking, we use spawn_blocking
-        let sess = self.connect(msg)?;
-        
+        let self_clone = Self::new(&self.config);
         tokio::task::spawn_blocking(move || {
+            let sess = self_clone.connect_to(&base_url)?;
             let sftp = sess.sftp()?;
             let mut remote_file = sftp.open(Path::new(&rel_path))?;
             
@@ -93,6 +93,52 @@ impl Transfer for SftpTransfer {
             }
 
             Ok(downloaded)
+        }).await?
+    }
+
+    async fn put(&self, msg: &Message, local_file: &Path, remote_file_name: &str) -> anyhow::Result<u64> {
+        let local_path = local_file.to_path_buf();
+        let remote_file_str = remote_file_name.to_string();
+        
+        let target_url = if let Some(st) = &self.config.send_to {
+            st.clone()
+        } else {
+            msg.base_url.clone()
+        };
+
+        let self_clone = Self::new(&self.config);
+        tokio::task::spawn_blocking(move || {
+            let sess = self_clone.connect_to(&target_url)?;
+            let sftp = sess.sftp()?;
+            
+            let remote_p = Path::new(&remote_file_str);
+            
+            // Basic mkdir -p equivalent for remote path
+            if let Some(parent) = remote_p.parent() {
+                let mut current = std::path::PathBuf::new();
+                for part in parent.components() {
+                    current.push(part);
+                    // SFTP mkdir is not recursive and fails if it already exists
+                    let _ = sftp.mkdir(&current, 0o775);
+                }
+            }
+            
+            let mut remote_f = sftp.create(remote_p)?;
+            let mut local_f = std::fs::File::open(&local_path)?;
+            
+            let mut buffer = [0; 16384];
+            let mut uploaded = 0;
+
+            loop {
+                let bytes_read = local_f.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                remote_f.write_all(&buffer[..bytes_read])?;
+                uploaded += bytes_read as u64;
+            }
+
+            Ok(uploaded)
         }).await?
     }
 }
