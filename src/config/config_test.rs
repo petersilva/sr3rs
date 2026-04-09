@@ -220,7 +220,7 @@ fn test_stable_rand() {
     let old_home = std::env::var("HOME").ok();
     std::env::set_var("HOME", &home);
 
-    println!("Cache dir: {:?}", paths::get_user_cache_dir());
+    println!("Cache dir: {:?}", paths::get_user_cache_dir(None));
 
     let config_path = home.join("test.conf");
     std::fs::write(&config_path, "prefetch 10").unwrap();
@@ -272,7 +272,7 @@ fn test_subscriptions_persistence() {
     let q_name = config.subscriptions[0].queue.name.clone();
     
     // Check if file exists
-    let cache_dir = paths::get_user_cache_dir();
+    let cache_dir = paths::get_user_cache_dir(None);
     let state_path = cache_dir.join("subscribe/test/subscriptions.json");
     println!("Checking state path: {:?}", state_path);
     assert!(state_path.exists());

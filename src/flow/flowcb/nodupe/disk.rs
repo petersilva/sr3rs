@@ -36,7 +36,7 @@ impl DiskNoDupePlugin {
     pub fn new(config: &Config) -> Self {
         let config_part = config.configname.clone().unwrap_or_else(|| "unknown".to_string());
         
-        let cache_file = crate::config::paths::get_user_cache_dir()
+        let cache_file = crate::config::paths::get_user_cache_dir(config.host_dir.as_deref())
             .join(&config.component)
             .join(&config_part)
             .join(format!("recent_files_001.cache"));

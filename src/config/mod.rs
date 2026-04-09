@@ -101,6 +101,8 @@ pub struct Config {
     pub memory_max: u64,
     pub memory_baseline_file: u32,
     pub memory_multiplier: f64,
+    pub statehost: bool,
+    pub host_dir: Option<String>,
 
     pub flow_callbacks: Vec<String>,
 
@@ -170,6 +172,8 @@ impl Default for Config {
             memory_max: 0,
             memory_baseline_file: 100,
             memory_multiplier: 3.0,
+            statehost: false,
+            host_dir: None,
 
             flow_callbacks: Vec::new(),
 
@@ -212,7 +216,7 @@ impl Config {
             self.configname = Some(configname.clone());
             
             // Load state now that we have component and configname
-            let state = state::State::load_or_create(&self.component, &configname);
+            let state = state::State::load_or_create(self.host_dir.as_deref(), &self.component, &configname);
             self.rand4 = state.rand4;
             self.rand8 = state.rand8;
             self.subscriptions = state.subscriptions;
@@ -265,7 +269,7 @@ impl Config {
 
         // If we already have a configname, reload state for the new component
         if let Some(configname) = &self.configname {
-            let state = state::State::load_or_create(&self.component, configname);
+            let state = state::State::load_or_create(self.host_dir.as_deref(), &self.component, configname);
             self.rand4 = state.rand4;
             self.rand8 = state.rand8;
             self.subscriptions = state.subscriptions;
@@ -484,12 +488,6 @@ impl Config {
                     }
                     Ok(())
                 }
-                "logLevel" => {
-                    if let Some(ref val) = v {
-                        self.log_level = val.to_string();
-                    }
-                    Ok(())
-                }
                 "include" | "config" => {
                     if let Some(ref val) = v {
                         self.include_file(val)?;
@@ -649,9 +647,15 @@ impl Config {
                     }
                     Ok(())
                 }
-                "flowCallback" | "callback" => {
+                "statehost" => {
                     if let Some(ref val) = v {
-                        self.flow_callbacks.push(val.to_string());
+                        self.statehost = is_true(val);
+                    }
+                    Ok(())
+                }
+                "logLevel" | "loglevel" => {
+                    if let Some(ref val) = v {
+                        self.log_level = val.to_string();
                     }
                     Ok(())
                 }
@@ -863,6 +867,7 @@ impl Config {
             let state = state::State {
                 rand4: self.rand4.clone(),
                 rand8: self.rand8.clone(),
+                host_dir: self.host_dir.clone(),
                 subscriptions: self.subscriptions.clone(),
             };
             let _ = state.save(&self.component, configname);
@@ -871,6 +876,12 @@ impl Config {
     }
 
     pub fn finalize(&mut self) -> Result<(), ConfigError> {
+        if self.statehost {
+            self.host_dir = hostname::get()
+                .ok()
+                .map(|h| h.to_string_lossy().to_string());
+        }
+
         let mut vars = self.options.clone();
         vars.insert("APPNAME".to_string(), self.appname.clone());
         vars.insert("COMPONENT".to_string(), self.component.clone());

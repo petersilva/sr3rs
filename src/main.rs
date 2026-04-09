@@ -153,7 +153,7 @@ async fn main() -> Result<()> {
             config.load(config_file)?;
             config.finalize()?;
 
-            let state_dir = paths::get_user_cache_dir().join(&component).join(config.configname.as_deref().unwrap_or("unknown"));
+            let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&component).join(config.configname.as_deref().unwrap_or("unknown"));
             if state_dir.join("disabled").exists() {
                 anyhow::bail!("Config {} is disabled. It must be enabled before running.", config_file);
             }
@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                let state_dir = paths::get_user_cache_dir().join(&comp).join(config.configname.as_deref().unwrap_or("unknown"));
+                let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config.configname.as_deref().unwrap_or("unknown"));
                 if state_dir.join("disabled").exists() {
                     log::error!("Config {} is disabled. It must be enabled before starting.", config_file);
                     continue;
@@ -223,7 +223,7 @@ async fn main() -> Result<()> {
                 write!(f, "{}", num_instances)?;
 
                 for i in 1..=num_instances {
-                    let pid_file = paths::get_pid_filename(&comp, config.configname.as_deref(), i);
+                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config.configname.as_deref(), i);
                     if pid_file.exists() {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.parse::<i32>() {
@@ -264,7 +264,7 @@ async fn main() -> Result<()> {
 
                 let config_name = config.configname.as_deref();
                 
-                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name.unwrap_or("unknown"));
+                let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name.unwrap_or("unknown"));
                 let state_file = state_dir.join("instances_expected");
                 if state_file.exists() {
                     let _ = std::fs::remove_file(state_file);
@@ -272,7 +272,7 @@ async fn main() -> Result<()> {
 
                 let mut stopped_count = 0;
                 for i in 1..=100 { 
-                    let pid_file = paths::get_pid_filename(&comp, config_name, i);
+                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name, i);
                     if pid_file.exists() {
                         let pid_str = std::fs::read_to_string(&pid_file)?;
                         if let Ok(pid) = pid_str.parse::<i32>() {
@@ -328,7 +328,19 @@ async fn main() -> Result<()> {
                 let mut running_count = 0;
                 let expected_count = if config_loaded { config.instances } else { 1 };
 
-                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
+                let mut state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
+                
+                if !config_loaded && !state_dir.exists() {
+                    if let Ok(h) = hostname::get() {
+                        let h_str = h.to_string_lossy().to_string();
+                        let guessed_dir = paths::get_user_cache_dir(Some(&h_str)).join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
+                        if guessed_dir.exists() {
+                            state_dir = guessed_dir;
+                            config.host_dir = Some(h_str);
+                        }
+                    }
+                }
+
                 let instances_requested_file = state_dir.join("instances_expected");
 
                 let instances_requested = if instances_requested_file.exists() {
@@ -338,7 +350,7 @@ async fn main() -> Result<()> {
                 };
 
                 for i in 1..=100 {
-                    let pid_file = paths::get_pid_filename(&comp, config_name.as_deref(), i);
+                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i);
                     if pid_file.exists() {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.parse::<i32>() {
@@ -384,7 +396,7 @@ async fn main() -> Result<()> {
 
                 if let Some(ref c_name) = config_name {
                     for i in 1..=100 {
-                        let metrics_file = paths::get_metrics_filename(&comp, Some(c_name), i);
+                        let metrics_file = paths::get_metrics_filename(config.host_dir.as_deref(), &comp, Some(c_name), i);
                         if metrics_file.exists() {
                             if let Ok(content) = std::fs::read_to_string(metrics_file) {
                                 if let Ok(metrics) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -447,7 +459,7 @@ async fn main() -> Result<()> {
                 }
 
                 let config_name = config.configname.as_deref().unwrap_or("unknown");
-                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name);
+                let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name);
                 let disabled_file = state_dir.join("disabled");
 
                 if disabled_file.exists() {
@@ -479,7 +491,7 @@ async fn main() -> Result<()> {
                 }
 
                 let config_name = config.configname.as_deref().unwrap_or("unknown");
-                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name);
+                let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name);
                 let disabled_file = state_dir.join("disabled");
 
                 if disabled_file.exists() {
@@ -490,7 +502,7 @@ async fn main() -> Result<()> {
                 // Check if any instances are running
                 let mut running = false;
                 for i in 1..=config.instances {
-                    let pid_file = paths::get_pid_filename(&comp, Some(config_name), i);
+                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, Some(config_name), i);
                     if pid_file.exists() {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.parse::<i32>() {
@@ -535,7 +547,7 @@ async fn main() -> Result<()> {
 
                 // First stop any running instances
                 let config_name = config.configname.as_deref();
-                let state_dir = paths::get_user_cache_dir().join(&comp).join(config_name.unwrap_or("unknown"));
+                let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name.unwrap_or("unknown"));
                 let state_file = state_dir.join("instances_expected");
                 if state_file.exists() {
                     let _ = std::fs::remove_file(state_file);
@@ -553,7 +565,7 @@ async fn main() -> Result<()> {
 
                 let mut stopped_count = 0;
                 for i in 1..=100 { 
-                    let pid_file = paths::get_pid_filename(&comp, config_name, i);
+                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name, i);
                     if pid_file.exists() {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.parse::<i32>() {
@@ -705,13 +717,13 @@ async fn main() -> Result<()> {
             config.load(&config_file)?;
             config.finalize()?;
 
-            let state_dir = paths::get_user_cache_dir().join(&component).join(config.configname.as_deref().unwrap_or("unknown"));
+            let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&component).join(config.configname.as_deref().unwrap_or("unknown"));
             if state_dir.join("disabled").exists() {
                 anyhow::bail!("Config {} is disabled. Instance {} cannot start.", config_file, instance);
             }
 
-            let log_file = paths::get_log_filename(&component, config.configname.as_deref(), instance);
-            let pid_file = paths::get_pid_filename(&component, config.configname.as_deref(), instance);
+            let log_file = paths::get_log_filename(config.host_dir.as_deref(), &component, config.configname.as_deref(), instance);
+            let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &component, config.configname.as_deref(), instance);
 
             setup_logging(log_level, Some(log_file.clone()))?;
             log::info!("Instance {} starting. Log: {}, PID: {}", instance, log_file.display(), std::process::id());

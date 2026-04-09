@@ -84,7 +84,7 @@ impl RetryPlugin {
 
         let config_part = config.configname.clone().unwrap_or_else(|| "unknown".to_string());
         
-        let cache_dir = crate::config::paths::get_user_cache_dir()
+        let cache_dir = crate::config::paths::get_user_cache_dir(config.host_dir.as_deref())
             .join(&config.component)
             .join(config_part);
 

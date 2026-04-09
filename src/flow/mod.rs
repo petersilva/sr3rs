@@ -397,7 +397,12 @@ pub trait Flow: Send + Sync {
                 
                 // Get instance number if we can... default to 1 for now.
                 let instance = 1; // FIXME: get from config or env
-                let metrics_file = crate::config::paths::get_metrics_filename(&component, Some(configname), instance);
+                let metrics_file = crate::config::paths::get_metrics_filename(
+                    self.config().host_dir.as_deref(),
+                    &component,
+                    Some(configname.as_str()),
+                    instance,
+                );
                 
                 if let Some(parent) = metrics_file.parent() {
                     if !parent.exists() {

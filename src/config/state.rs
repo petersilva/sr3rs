@@ -14,23 +14,26 @@ pub struct State {
     pub rand4: String,
     pub rand8: String,
     #[serde(default)]
+    pub host_dir: Option<String>,
+    #[serde(default)]
     pub subscriptions: Vec<Subscription>,
 }
 
 impl State {
-    pub fn new() -> Self {
+    pub fn new(host_dir: Option<String>) -> Self {
         let mut rng = rand::thread_rng();
         let r4: u16 = rng.gen_range(0..0xFFFF);
         let r8: u32 = rng.gen();
         Self {
             rand4: format!("{:04x}", r4),
             rand8: format!("{:08x}", r8),
+            host_dir,
             subscriptions: Vec::new(),
         }
     }
 
-    pub fn load_or_create(component: &str, configname: &str) -> Self {
-        let state_dir = paths::get_user_cache_dir()
+    pub fn load_or_create(host_dir: Option<&str>, component: &str, configname: &str) -> Self {
+        let state_dir = paths::get_user_cache_dir(host_dir)
             .join(component)
             .join(configname);
         
@@ -41,6 +44,10 @@ impl State {
         if state_json_path.exists() {
             if let Ok(content) = fs::read_to_string(&state_json_path) {
                 if let Ok(mut state) = serde_json::from_str::<State>(&content) {
+                    // Update host_dir if it was None or different in the file?
+                    // Usually we want to keep the one passed in.
+                    state.host_dir = host_dir.map(|s| s.to_string());
+
                     // Deduplicate
                     let mut unique_subs: Vec<Subscription> = Vec::new();
                     for sub in state.subscriptions.drain(..) {
@@ -58,7 +65,7 @@ impl State {
         if subscriptions_path.exists() {
             if let Ok(content) = fs::read_to_string(&subscriptions_path) {
                 if let Ok(subscriptions) = serde_json::from_str::<Vec<Subscription>>(&content) {
-                    let mut state = Self::new();
+                    let mut state = Self::new(host_dir.map(|s| s.to_string()));
                     
                     // Deduplicate
                     let mut unique_subs: Vec<Subscription> = Vec::new();
@@ -84,11 +91,11 @@ impl State {
         }
 
         // Create new state if not found or invalid
-        Self::new()
+        Self::new(host_dir.map(|s| s.to_string()))
     }
 
     pub fn save(&self, component: &str, configname: &str) -> anyhow::Result<()> {
-        let state_dir = paths::get_user_cache_dir()
+        let state_dir = paths::get_user_cache_dir(self.host_dir.as_deref())
             .join(component)
             .join(configname);
         
