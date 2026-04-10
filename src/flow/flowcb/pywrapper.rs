@@ -210,7 +210,7 @@ impl FlowCB for PyWrapperPlugin {
         Ok(())
     }
 
-    async fn on_housekeeping(&self, _wl: &mut Worklist) -> anyhow::Result<()> {
+    async fn on_housekeeping(&self) -> anyhow::Result<()> {
         let instance_clone = self.instance.clone();
         let join_handle: tokio::task::JoinHandle<PyResult<()>> = tokio::task::spawn_blocking(move || {
             Python::with_gil(|py| -> PyResult<()> {

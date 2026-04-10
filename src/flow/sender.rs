@@ -278,8 +278,8 @@ impl Flow for SenderFlow {
         Ok(())
     }
 
-    async fn housekeeping(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        self.base.housekeeping(worklist).await
+    async fn housekeeping(&self) -> anyhow::Result<()> {
+        self.base.housekeeping().await
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {

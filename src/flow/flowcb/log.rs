@@ -210,7 +210,7 @@ impl FlowCB for LogPlugin {
         Ok(())
     }
 
-    async fn on_housekeeping(&self, _worklist: &mut Worklist) -> anyhow::Result<()> {
+    async fn on_housekeeping(&self) -> anyhow::Result<()> {
         if self.log_events.contains("on_housekeeping") {
             self.stats();
             log::debug!("housekeeping");

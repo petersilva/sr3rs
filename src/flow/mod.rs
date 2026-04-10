@@ -343,7 +343,7 @@ pub trait Flow: Send + Sync {
             tokio::select! {
                 _ = token.cancelled() => {
                     ::log::info!("Shutdown requested. Finalizing...");
-                    self.housekeeping(&mut worklist).await?;
+                    self.housekeeping().await?;
                     for cb_mutex in self.callbacks() {
                         let mut cb = cb_mutex.lock().await;
                         cb.on_stop().await?;
@@ -356,7 +356,7 @@ pub trait Flow: Send + Sync {
                     total_messages += count;
                     if message_count_max > 0 && total_messages >= message_count_max {
                         ::log::info!("{} messages processed >= messageCountMax {}. Shutting down...", total_messages, message_count_max);
-                        self.housekeeping(&mut worklist).await?;
+                        self.housekeeping().await?;
                         for cb_mutex in self.callbacks() {
                             let mut cb = cb_mutex.lock().await;
                             cb.on_stop().await?;
@@ -368,7 +368,7 @@ pub trait Flow: Send + Sync {
             }
             
             if last_housekeeping.elapsed() >= housekeeping_interval {
-                self.housekeeping(&mut worklist).await?;
+                self.housekeeping().await?;
                 last_housekeeping = std::time::Instant::now();
             }
 
@@ -376,7 +376,7 @@ pub trait Flow: Send + Sync {
                 tokio::select! {
                     _ = token.cancelled() => {
                         ::log::info!("Shutdown requested during sleep. Finalizing...");
-                        self.housekeeping(&mut worklist).await?;
+                        self.housekeeping().await?;
                         for cb_mutex in self.callbacks() {
                             let mut cb = cb_mutex.lock().await;
                             cb.on_stop().await?;
@@ -391,7 +391,7 @@ pub trait Flow: Send + Sync {
         Ok(())
     }
 
-    async fn housekeeping(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+    async fn housekeeping(&self) -> anyhow::Result<()> {
         {
             let logger_arc = self.logger();
             let mut logger = logger_arc.lock().await;
@@ -447,7 +447,7 @@ pub trait Flow: Send + Sync {
 
         for cb_mutex in self.callbacks() {
             let cb = cb_mutex.lock().await;
-            cb.on_housekeeping(worklist).await?;
+            cb.on_housekeeping().await?;
         }
 
         Ok(())

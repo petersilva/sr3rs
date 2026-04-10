@@ -118,7 +118,7 @@ impl FlowCB for MDelayLatestPlugin {
         Ok(())
     }
 
-    async fn on_housekeeping(&self, _wl: &mut Worklist) -> anyhow::Result<()> {
+    async fn on_housekeeping(&self) -> anyhow::Result<()> {
         let mut state = self.state.lock().unwrap();
         ::log::info!(
             "suppressions={} currently delay queue length: {}",

@@ -301,7 +301,7 @@ impl FlowCB for DiskNoDupePlugin {
         Ok(())
     }
 
-    async fn on_housekeeping(&self, _wl: &mut Worklist) -> anyhow::Result<()> {
+    async fn on_housekeeping(&self) -> anyhow::Result<()> {
         let mut state = self.state.lock().unwrap();
         let now = Self::now_flt();
         
@@ -464,8 +464,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
 
         // 4. Run housekeeping (should clean expired cache)
-        let mut hk_wl = Worklist::new();
-        plugin.on_housekeeping(&mut hk_wl).await.unwrap();
+        plugin.on_housekeeping().await.unwrap();
 
         // 5. Try accepting again, it should pass now
         let mut wl3 = Worklist::new();

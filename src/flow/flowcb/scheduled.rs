@@ -168,7 +168,7 @@ impl FlowCB for ScheduledPlugin {
         Ok(())
     }
 
-    async fn on_housekeeping(&self, _worklist: &mut Worklist) -> anyhow::Result<()> {
+    async fn on_housekeeping(&self) -> anyhow::Result<()> {
         ::log::info!("Scheduled: next gather scheduled for {}", self.next_gather_time);
         if !self.appointments.is_empty() {
             ::log::info!("Scheduled: {} appointments remaining for today", self.appointments.len());

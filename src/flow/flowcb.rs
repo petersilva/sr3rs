@@ -218,7 +218,7 @@ pub trait FlowCB: Send + Sync {
     }
 
     /// Called periodically for maintenance tasks.
-    async fn on_housekeeping(&self, _worklist: &mut Worklist) -> anyhow::Result<()> {
+    async fn on_housekeeping(&self) -> anyhow::Result<()> {
         Ok(())
     }
 
