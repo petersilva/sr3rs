@@ -10,7 +10,10 @@ use async_trait::async_trait;
 use std::path::Path;
 use std::net::TcpStream;
 use ssh2::Session;
+use ssh2_config_rs::SshConfig;
+use ssh2_config_rs::ParseRule;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 
 pub struct SftpTransfer {
     config: Config,
@@ -25,32 +28,108 @@ impl SftpTransfer {
 
     fn connect_to(&self, url_str: &str) -> anyhow::Result<Session> {
         let url = url::Url::parse(url_str)?;
-        let host = url.host_str().ok_or_else(|| anyhow::anyhow!("No host in URL: {}", url_str))?;
-        let port = url.port().unwrap_or(22);
-        let user = url.username();
+        let mut host = url.host_str().ok_or_else(|| anyhow::anyhow!("No host in URL: {}", url_str))?.to_string();
+        let mut port = url.port().unwrap_or(22);
+        let mut user = url.username().to_string();
         let password = url.password();
+
+        // 1. Try to parse SSH config
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let mut identity_files: Vec<String> = Vec::new();
+
+        if let Ok(ssh_config) = SshConfig::parse_default_file(ParseRule::ALLOW_UNKNOWN_FIELDS) {
+            let params = ssh_config.query(&host);
+            
+            if let Some(hostname) = params.host_name {
+                host = hostname;
+            }
+            if let Some(p) = params.port {
+                port = p;
+            }
+            if let Some(u) = params.user {
+                if user.is_empty() {
+                    user = u;
+                }
+            }
+            if let Some(ids) = params.identity_file {
+                // Identity files from ssh config can sometimes have multiple entries per host block
+                // but SshConfig might return a single PathBuf, or a Vec<PathBuf> depending on library version.
+                // Assuming `ids` is a `Vec<String>` or similar based on docs. If it's a Vec<PathBuf> or Option<Vec<String>>
+                // Let's handle it safely by parsing whatever it gives us as strings.
+                
+                // Let's assume ssh2-config-rs returns `Option<Vec<String>>` or `Option<String>`
+                // We'll map whatever it is into our identity_files vec.
+                
+                // Actually ssh2_config_rs returns a `Option<Vec<String>>` for identity_file.
+                for id in ids {
+                    identity_files.push(id.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // 2. Override with local SR3 credentials if found and URL had missing info
+        let (final_user, final_pass) = if user.is_empty() || password.is_none() {
+            if let Some(cred) = self.config.credentials.get(url_str) {
+                (cred.url.username().to_string(), cred.url.password().map(|s| s.to_string()))
+            } else {
+                (user, password.map(|s| s.to_string()))
+            }
+        } else {
+            (user, password.map(|s| s.to_string()))
+        };
+        
+        let final_user = if final_user.is_empty() {
+            std::env::var("USER").unwrap_or_else(|_| "root".to_string())
+        } else {
+            final_user
+        };
+
+        log::debug!("SFTP Connect to {}:{} as user {}", host, port, final_user);
 
         let tcp = TcpStream::connect(format!("{}:{}", host, port))?;
         let mut sess = Session::new()?;
         sess.set_tcp_stream(tcp);
         sess.handshake()?;
 
-        // Try to find credentials if not in URL
-        let (final_user, final_pass) = if user.is_empty() || password.is_none() {
-            if let Some(cred) = self.config.credentials.get(url_str) {
-                (cred.url.username().to_string(), cred.url.password().map(|s| s.to_string()))
-            } else {
-                (user.to_string(), password.map(|s| s.to_string()))
-            }
-        } else {
-            (user.to_string(), password.map(|s| s.to_string()))
-        };
-
         if let Some(pass) = final_pass {
             sess.userauth_password(&final_user, &pass)?;
         } else {
-            // Try agent or default keys? For now just try agent.
-            sess.userauth_agent(&final_user)?;
+            // Try agent first
+            if sess.userauth_agent(&final_user).is_err() {
+                let mut authenticated = false;
+                
+                // Try identities from ssh config
+                for id_file in identity_files {
+                    let path = if id_file.starts_with("~/") {
+                        home_dir.join(id_file.trim_start_matches("~/"))
+                    } else {
+                        PathBuf::from(id_file)
+                    };
+                    
+                    if path.exists() {
+                        if sess.userauth_pubkey_file(&final_user, None, &path, None).is_ok() {
+                            authenticated = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // If not authenticated, try standard default keys
+                if !authenticated {
+                    let ssh_dir = home_dir.join(".ssh");
+                    let ed25519 = ssh_dir.join("id_ed25519");
+                    let rsa = ssh_dir.join("id_rsa");
+                    let dsa = ssh_dir.join("id_dsa");
+                    
+                    if ed25519.exists() && sess.userauth_pubkey_file(&final_user, None, &ed25519, None).is_ok() {
+                        // success
+                    } else if rsa.exists() && sess.userauth_pubkey_file(&final_user, None, &rsa, None).is_ok() {
+                        // success
+                    } else if dsa.exists() && sess.userauth_pubkey_file(&final_user, None, &dsa, None).is_ok() {
+                        // success
+                    }
+                }
+            }
         }
 
         if !sess.authenticated() {

@@ -198,9 +198,26 @@ impl Flow for SenderFlow {
             for mut m in worklist.incoming.drain(..) {
                 // Determine local file to send
                 // msg['relPath'] or similar
-                
-                let base_dir = &config.directory;
-                let local_file = base_dir.join(&m.rel_path);
+                let local_file = if !config.directory.as_os_str().is_empty() {
+                    let dir_str = config.directory.to_string_lossy().into_owned();
+                    // Treat config.directory as a base prefix that handles variable expansion properly
+                    // e.g. "directory /" + "home/peter/..." -> "/home/peter/..."
+                    // "directory ." + "home/peter/..." -> "./home/peter/..."
+                    
+                    let rel_path = m.rel_path.trim_start_matches('/');
+                    
+                    if dir_str == "." {
+                        // If directory is ".", just use rel_path but prepend "./" 
+                        // Wait, if it's ".", and we append "home/...", we get "./home/..." which fails 
+                        // if the file is ACTUALLY at "/home/...".
+                        // In Sarracenia, if `baseDir` is not set, it defaults to `/` + relPath.
+                        std::path::Path::new("/").join(rel_path)
+                    } else {
+                        config.directory.join(rel_path)
+                    }
+                } else {
+                    std::path::Path::new("/").join(m.rel_path.trim_start_matches('/'))
+                };
 
                 if !local_file.exists() {
                      log::error!("WORK: local file does not exist: {}", local_file.display());
