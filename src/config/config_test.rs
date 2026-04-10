@@ -337,3 +337,35 @@ fn test_parse_subscription_deduplication() {
     config.parse_subscription(None, None);
     assert_eq!(config.subscriptions.len(), 1);
 }
+
+#[test]
+fn test_post_base_dir_derivation() {
+    let mut config = Config::default();
+    config.parse_string("post_baseUrl file:/tmp/foo", "test.conf").unwrap();
+    config.finalize().unwrap();
+    
+    assert_eq!(config.post_base_dir, Some(PathBuf::from("/tmp/foo")));
+    
+    // Test that file:/ results in /
+    let mut config_root = Config::default();
+    config_root.parse_string("post_baseUrl file:/", "test.conf").unwrap();
+    config_root.finalize().unwrap();
+    assert_eq!(config_root.post_base_dir, Some(PathBuf::from("/")));
+
+    // Test that explicit post_baseDir wins
+    let mut config2 = Config::default();
+    config2.parse_string("post_baseUrl file:/tmp/foo", "test.conf").unwrap();
+    config2.parse_string("post_baseDir /var/tmp", "test.conf").unwrap();
+    config2.finalize().unwrap();
+    
+    assert_eq!(config2.post_base_dir, Some(PathBuf::from("/var/tmp")));
+}
+
+#[test]
+fn test_post_base_dir_default_to_directory() {
+    let mut config = Config::default();
+    config.directory = PathBuf::from("/home/user/data");
+    config.finalize().unwrap();
+    
+    assert_eq!(config.post_base_dir, Some(PathBuf::from("/home/user/data")));
+}

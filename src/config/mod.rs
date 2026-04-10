@@ -915,6 +915,22 @@ impl Config {
                 .map(|h| h.to_string_lossy().to_string());
         }
 
+        if self.post_base_dir.is_none() {
+            if let Some(post_base_url) = &self.post_base_url {
+                if post_base_url.starts_with("file:") {
+                    self.post_base_dir = Some(PathBuf::from(&post_base_url[5..]));
+                } else if post_base_url.starts_with("sftp:") {
+                    if let Ok(u) = url::Url::parse(post_base_url) {
+                        self.post_base_dir = Some(PathBuf::from(u.path()));
+                    }
+                }
+            }
+        }
+
+        if self.post_base_dir.is_none() {
+            self.post_base_dir = Some(self.directory.clone());
+        }
+
         let mut vars = self.options.clone();
         vars.insert("APPNAME".to_string(), self.appname.clone());
         vars.insert("COMPONENT".to_string(), self.component.clone());
