@@ -131,16 +131,16 @@ impl GatherFilePlugin {
             }
         }, notify::Config::default())?;
 
-        let pbd = self.config.post_base_dir.clone().unwrap_or_else(|| self.config.directory.clone());
+        let watch_dir = self.config.directory.clone();
         let mode = if self.config.recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
         
-        if pbd.exists() {
-            watcher.watch(&pbd, mode)?;
-            ::log::info!("GatherFile: kernel-level watcher active on {}", pbd.display());
+        if watch_dir.exists() {
+            watcher.watch(&watch_dir, mode)?;
+            ::log::info!("GatherFile: kernel-level watcher active on {}", watch_dir.display());
             self.watcher = Some(watcher);
             self.rx = Some(rx);
         } else {
-            ::log::warn!("GatherFile: directory {} does not exist, cannot start watcher.", pbd.display());
+            ::log::warn!("GatherFile: directory {} does not exist, cannot start watcher.", watch_dir.display());
         }
 
         Ok(())
@@ -188,9 +188,9 @@ impl FlowCB for GatherFilePlugin {
                  }
                  ::log::info!("GatherFile: found {} files in CLI paths.", messages.len());
              } else {
-                 let pbd = self.config.post_base_dir.clone().unwrap_or_else(|| self.config.directory.clone());
-                 if pbd.exists() {
-                     messages = self.walk(&pbd);
+                 let watch_dir = self.config.directory.clone();
+                 if watch_dir.exists() {
+                     messages = self.walk(&watch_dir);
                  }
              }
 

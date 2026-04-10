@@ -188,7 +188,7 @@ impl Flow for SenderFlow {
                 // Determine local file to send
                 // msg['relPath'] or similar
                 
-                let base_dir = config.post_base_dir.as_ref().or(Some(&config.directory)).unwrap();
+                let base_dir = &config.directory;
                 let local_file = base_dir.join(&m.rel_path);
 
                 if !local_file.exists() {
