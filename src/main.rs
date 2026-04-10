@@ -25,6 +25,10 @@ struct Cli {
     /// Enable debug logging (alias for --log_level debug)
     #[arg(long, global = true)]
     debug: bool,
+
+    /// Confirm you want to do something dangerous (required when operating on multiple configs)
+    #[arg(long = "dangerWillRobinson", global = true, default_value_t = 0)]
+    danger_will_robinson: usize,
 }
 
 #[derive(Subcommand)]
@@ -68,6 +72,15 @@ enum Commands {
     Cleanup {
         /// Path or pattern to the configuration file(s)
         config_pattern: Option<String>,
+        #[arg(long = "dangerWillRobinson", default_value_t = 0)]
+        danger_will_robinson: usize,
+    },
+    /// Remove flow configurations and files
+    Remove {
+        /// Path or pattern to the configuration file(s)
+        config_pattern: Option<String>,
+        #[arg(long = "dangerWillRobinson", default_value_t = 0)]
+        danger_will_robinson: usize,
     },
     /// Edit the configuration file(s)
     Edit {
@@ -542,9 +555,15 @@ async fn main() -> Result<()> {
                 println!("Disabled {}/{}.", comp, config_name);
             }
         }
-        Commands::Cleanup { config_pattern } => {
+        Commands::Cleanup { config_pattern, danger_will_robinson } => {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
+
+            if configs.len() > 1 && danger_will_robinson != configs.len() {
+                log::error!("specify --dangerWillRobinson={} to cleanup multiple configs when > 1 involved. (actual: {}, given: {})", 
+                    configs.len(), configs.len(), danger_will_robinson);
+                return Ok(());
+            }
 
             for config_file in configs {
                 if is_global_config(&config_file) {
@@ -744,6 +763,28 @@ async fn main() -> Result<()> {
                 }
                 flow.shutdown().await?;
                 log::info!("Successfully announced {} files (out of {} found) using {}.", total_announced, total_found, config_file);
+            }
+        }
+        Commands::Remove { config_pattern, danger_will_robinson } => {
+            setup_logging(log_level, None)?;
+            let configs = resolve_patterns(config_pattern);
+
+            if configs.len() > 1 && danger_will_robinson != configs.len() {
+                log::error!("specify --dangerWillRobinson={} to remove multiple configs when > 1 involved. (actual: {}, given: {})", 
+                    configs.len(), configs.len(), danger_will_robinson);
+                return Ok(());
+            }
+
+            for config_file in configs {
+                if is_global_config(&config_file) {
+                    continue;
+                }
+                
+                log::info!("Removing configuration: {}", config_file);
+                if std::path::Path::new(&config_file).exists() {
+                    let _ = std::fs::remove_file(&config_file);
+                }
+                // Further cleanup (like state dir removal) could happen here or share logic with Cleanup
             }
         }
         Commands::RunInstance { component, config_file, instance } => {
