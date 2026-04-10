@@ -391,29 +391,29 @@ async fn main() -> Result<()> {
                 };
 
                 let mut state = if state_dir.join("disabled").exists() {
-                    "DISABLED".to_string()
+                    "stop".to_string()
                 } else if instances_requested == 0 && running_count == 0 {
                     if comp == "post" || comp == "cpost" {
-                        "INTER".to_string()
+                        "inte".to_string()
                     } else if state_exists {
-                        "STOPPED".to_string()
+                        "stop".to_string()
                     } else {
-                        "NEW".to_string()
+                        "new".to_string()
                     }
                 } else if running_count == 0 {
                     if comp == "post" || comp == "cpost" {
-                        "INTER".to_string()
+                        "inte".to_string()
                     } else {
-                        "STOPPED".to_string()
+                        "stop".to_string()
                     }
                 } else if running_count < instances_requested {
-                    "PARTIAL".to_string()
+                    "part".to_string()
                 } else {
-                    "RUNNING".to_string()
+                    "run".to_string()
                 };
 
                 if running_count > 0 && !config.vip.is_empty() && !config.has_vip() {
-                    state = "WAITVIP".to_string();
+                    state = "wvip".to_string();
                 }
 
                 if !config_loaded || !config_finalized {
