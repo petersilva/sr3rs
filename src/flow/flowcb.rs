@@ -11,6 +11,7 @@ pub mod mdelaylatest;
 pub mod nodupe;
 pub mod gather_file;
 pub mod scheduled;
+pub mod poll;
 
 use crate::message::Message;
 use crate::flow::Worklist;
@@ -34,6 +35,7 @@ pub fn get_plugin(name: &str, config: &Config) -> Option<Arc<Mutex<dyn FlowCB>>>
         "data_only" => Some(Arc::new(Mutex::new(nodupe::modifiers::DataOnlyPlugin::new()))),
         "file" => Some(Arc::new(Mutex::new(gather_file::GatherFilePlugin::new(config)))),
         "scheduled" => Some(Arc::new(Mutex::new(scheduled::ScheduledPlugin::new(config)))),
+        "poll" => Some(Arc::new(Mutex::new(poll::PollPlugin::new(config)))),
         _ => {
             match pywrapper::PyWrapperPlugin::new(name, config) {
                 Ok(plugin) => Some(Arc::new(Mutex::new(plugin))),

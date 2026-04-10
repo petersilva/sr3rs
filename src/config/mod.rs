@@ -79,6 +79,7 @@ pub struct Config {
     pub post_format: Option<String>,
     pub post_base_dir: Option<PathBuf>,
     pub post_base_url: Option<String>,
+    pub poll_url: Option<String>,
 
     // Advanced options from default_options
     pub attempts: u32,
@@ -156,6 +157,7 @@ impl Default for Config {
             post_format: None,
             post_base_dir: None,
             post_base_url: None,
+            poll_url: None,
 
             attempts: 3,
             batch: 100,
@@ -290,6 +292,8 @@ impl Config {
                 self.nodupe_ttl = 7 * 3600;
                 self.perm_default = 0o400;
                 self.sleep = 5.0;
+                self.flow_callbacks.push("scheduled".to_string());
+                self.flow_callbacks.push("poll".to_string());
                 self.flow_callbacks.push("nodupe".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
@@ -567,7 +571,12 @@ impl Config {
                     }
                     Ok(())
                 }
-
+                "pollUrl" => {
+                    if let Some(ref val) = v {
+                        self.poll_url = Some(val.to_string());
+                    }
+                    Ok(())
+                }
                 "attempts" => {
                     if let Some(ref val) = v {
                         self.attempts = parse_count(val);
@@ -982,9 +991,15 @@ impl Config {
             self.batch = self.message_count_max;
         }
 
-        if self.component == "poll" && !self.vip.is_empty() && self.broker.is_none() && self.post_broker.is_some() {
-            log::info!("POLL/VIP: setting loopback subscription to post_broker for cache warming.");
-            self.broker = self.post_broker.clone();
+        if self.component == "poll" {
+            if !self.vip.is_empty() && self.broker.is_none() && self.post_broker.is_some() {
+                log::info!("POLL/VIP: setting loopback subscription to post_broker for cache warming.");
+                self.broker = self.post_broker.clone();
+            }
+
+            if (self.nodupe_ttl as f64) < self.file_age_max {
+                log::warn!("nodupe_ttl < fileAgeMax means some files could age out of the cache and be re-ingested ( see : https://github.com/MetPX/sarracenia/issues/904 )");
+            }
         }
 
         if self.post_broker.is_some() {
@@ -1070,6 +1085,19 @@ impl Config {
                     if let Some(db_cred) = self.credentials.get(&cred.url.to_string()) {
                         let _ = cred.url.set_password(db_cred.url.password());
                     }
+                }
+            }
+        }
+
+        if self.component == "poll" {
+            if !self.subscriptions.is_empty() && !self.publishers.is_empty() {
+                let sx = self.subscriptions[0].bindings.get(0).and_then(|b| b.exchange.as_deref()).unwrap_or("xpublic");
+                let px = self.publishers[0].exchange.get(0).map(|s| s.as_str()).unwrap_or("xpublic");
+                
+                if sx != px {
+                    log::warn!("post_exchange: {} is different from exchange: {}. The settings need for multiple instances to share a poll.", px, sx);
+                } else {
+                    log::debug!("Good! post_exchange: {} and exchange: {} match so multiple instances to share a poll.", px, sx);
                 }
             }
         }
