@@ -572,12 +572,20 @@ async fn main() -> Result<()> {
 
                 let subscriptions_json = state_dir.join("subscriptions.json");
                 if subscriptions_json.exists() {
-                    let _ = std::fs::remove_file(subscriptions_json);
+                    if let Err(e) = std::fs::remove_file(&subscriptions_json) {
+                        log::error!("Failed to remove {}: {}", subscriptions_json.display(), e);
+                    } else {
+                        log::info!("Removed {}", subscriptions_json.display());
+                    }
                 }
 
                 let dot_state_json = state_dir.join(".state.json");
                 if dot_state_json.exists() {
-                    let _ = std::fs::remove_file(dot_state_json);
+                    if let Err(e) = std::fs::remove_file(&dot_state_json) {
+                        log::error!("Failed to remove {}: {}", dot_state_json.display(), e);
+                    } else {
+                        log::info!("Removed {}", dot_state_json.display());
+                    }
                 }
 
                 let mut stopped_count = 0;

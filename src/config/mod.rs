@@ -241,7 +241,6 @@ impl Config {
             }
         }
         self.read_file(path.to_str().unwrap())?;
-        self.save_state()?;
         Ok(())
     }
 
@@ -1102,7 +1101,6 @@ impl Config {
             }
         }
 
-        self.save_state()?;
         Ok(())
     }
 

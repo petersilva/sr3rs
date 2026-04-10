@@ -228,7 +228,7 @@ fn test_stable_rand() {
     let mut config = Config::default();
     config.apply_component_defaults("testcomp");
     config.load(config_path.to_str().unwrap()).unwrap();
-    
+    config.save_state().unwrap();    
     let r4 = config.rand4.clone();
     let r8 = config.rand8.clone();
     
@@ -267,7 +267,7 @@ fn test_subscriptions_persistence() {
     config.apply_component_defaults("subscribe");
     config.load(config_path.to_str().unwrap()).unwrap();
     config.finalize().unwrap();
-    
+    config.save_state().unwrap();    
     assert_eq!(config.subscriptions.len(), 1);
     let q_name = config.subscriptions[0].queue.name.clone();
     
