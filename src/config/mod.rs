@@ -115,6 +115,7 @@ pub struct Config {
     pub rand4: String,
     pub rand8: String,
     pub send_to: Option<String>,
+    pub vip: Vec<String>,
 }
 
 impl Default for Config {
@@ -190,6 +191,7 @@ impl Default for Config {
             rand4: format!("{:04x}", r4),
             rand8: format!("{:08x}", r8),
             send_to: None,
+            vip: Vec::new(),
         }
     }
 }
@@ -482,6 +484,12 @@ impl Config {
                 "sendTo" => {
                     if let Some(ref val) = v {
                         self.send_to = Some(val.to_string());
+                    }
+                    Ok(())
+                }
+                "vip" => {
+                    if let Some(ref val) = v {
+                        self.vip.extend(val.split_whitespace().map(|s| s.to_string()));
                     }
                     Ok(())
                 }
@@ -908,6 +916,33 @@ impl Config {
         Ok(())
     }
 
+    pub fn has_vip(&self) -> bool {
+        if self.vip.is_empty() {
+            return true;
+        }
+
+        match get_if_addrs::get_if_addrs() {
+            Ok(ifaces) => {
+                for iface in ifaces {
+                    let addr = iface.addr.ip().to_string();
+                    if self.vip.contains(&addr) {
+                        return true;
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("CONFIG: error getting network interfaces: {}", e);
+            }
+        }
+        false
+    }
+
+    pub fn is_active(&self) -> bool {
+        // standalone (no vip) is always active.
+        // if vip is set, must have it to be active.
+        self.has_vip()
+    }
+
     pub fn finalize(&mut self) -> Result<(), ConfigError> {
         if self.statehost {
             self.host_dir = hostname::get()
@@ -947,11 +982,20 @@ impl Config {
             self.batch = self.message_count_max;
         }
 
+        if self.component == "poll" && !self.vip.is_empty() && self.broker.is_none() && self.post_broker.is_some() {
+            log::info!("POLL/VIP: setting loopback subscription to post_broker for cache warming.");
+            self.broker = self.post_broker.clone();
+        }
+
         if self.post_broker.is_some() {
             let broker_url = self.post_broker.as_ref().unwrap().url.to_string();
             if broker_url.contains('$') {
                 let expanded = variable_expansion::expand_variables(&broker_url, &vars);
                 self.post_broker = Some(Broker::parse(&expanded).map_err(|e| ConfigError::Parse(format!("post_broker finalize error: {}", e)))?);
+            }
+            // If we copied post_broker to broker, update it now that it is expanded
+            if self.component == "poll" && !self.vip.is_empty() {
+                 self.broker = self.post_broker.clone();
             }
             self.parse_publisher();
         }

@@ -399,6 +399,10 @@ async fn main() -> Result<()> {
                     "RUNNING".to_string()
                 };
 
+                if running_count > 0 && !config.vip.is_empty() && !config.has_vip() {
+                    state = "WAITVIP".to_string();
+                }
+
                 if !config_loaded || !config_finalized {
                     state = format!("{} (ERR)", state);
                 }

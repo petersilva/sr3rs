@@ -274,6 +274,7 @@ impl Flow for SubscribeFlow {
 
         if total_gathered > 0 {
             log::info!("GATHER: received {} messages.", total_gathered);
+            worklist.gathered_from_mq += total_gathered;
         }
 
         Ok(())

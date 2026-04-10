@@ -152,6 +152,9 @@ impl Flow for SenderFlow {
                 }
             }
         }
+        if total_gathered > 0 {
+            worklist.gathered_from_mq += total_gathered;
+        }
         Ok(())
     }
 

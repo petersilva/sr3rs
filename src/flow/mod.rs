@@ -28,6 +28,7 @@ pub struct Worklist {
     pub rejected: Vec<Message>,
     pub failed: Vec<Message>,
     pub directories_ok: Vec<String>,
+    pub gathered_from_mq: usize,
 }
 
 impl Worklist {
@@ -41,6 +42,7 @@ impl Worklist {
         self.rejected.clear();
         self.failed.clear();
         self.directories_ok.clear();
+        self.gathered_from_mq = 0;
     }
 
     pub fn incoming_cursor(&mut self) -> IncomingCursor {
@@ -218,6 +220,14 @@ pub trait Flow: Send + Sync {
             return Ok(());
         }
 
+        let config = self.config();
+        
+        // Loopback protection for poll: only post if we didn't just ingest these from the queue.
+        if config.component == "poll" && worklist.gathered_from_mq > 0 {
+             ::log::debug!("POST: loopback protection active, skipping post of {} messages ingested from queue.", worklist.ok.len());
+             return Ok(());
+        }
+
         let mut next_ok = Vec::new();
         let mut failed_count = 0;
         let mut bytes_out = 0;
@@ -260,13 +270,31 @@ pub trait Flow: Send + Sync {
     }
 
     async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<usize> {
-        self.gather(worklist).await?;
-        for cb_mutex in self.callbacks() {
-            let mut cb = cb_mutex.lock().await;
-            cb.gather(worklist).await?;
+        let config = self.config();
+        let active = config.is_active();
+        
+        if !active {
+            if config.component == "poll" {
+                // In passive mode, POLL still gathers from the broker to warm its cache.
+                self.gather(worklist).await?;
+                // But we SKIP calling callbacks (which includes the Poll plugin itself)
+            } else {
+                // Other components just sleep when passive.
+                return Ok(0);
+            }
+        } else {
+            // Active mode: normal behavior.
+            self.gather(worklist).await?;
+            for cb_mutex in self.callbacks() {
+                let mut cb = cb_mutex.lock().await;
+                cb.gather(worklist).await?;
+            }
         }
 
         let gathered_count = worklist.incoming.len();
+        if gathered_count == 0 {
+            return Ok(0);
+        }
 
         {
             let metrics_arc = self.metrics();

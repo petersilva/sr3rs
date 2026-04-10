@@ -46,6 +46,7 @@ flate2 = "1.1.9"
 quick-xml = "0.39.2"
 ssh2 = "0.9.5"
 suppaftp = { version = "8.0.2", features = ["async-secure", "deprecated", "native-tls", "tokio", "tokio-async-native-tls"] }
+get_if_addrs = "0.5.3"
 
 [dev-dependencies]
 tempfile = "3.10"
