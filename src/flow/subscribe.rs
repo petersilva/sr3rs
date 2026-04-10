@@ -242,6 +242,14 @@ impl Flow for SubscribeFlow {
                 let _ = moth.close().await;
             }
         }
+
+        for cb_mutex in self.callbacks() {
+            let mut cb = cb_mutex.lock().await;
+            if let Err(e) = cb.on_cleanup().await {
+                log::warn!("Cleanup failed for plugin {}: {}", cb.name(), e);
+            }
+        }
+
         Ok(())
     }
 

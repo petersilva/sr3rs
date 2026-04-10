@@ -219,6 +219,30 @@ impl FlowCB for DiskNoDupePlugin {
         Ok(())
     }
 
+    async fn on_cleanup(&mut self) -> anyhow::Result<()> {
+        let state = self.state.lock().unwrap();
+        let cache_dir = state.cache_file.parent();
+
+        if let Some(dir) = cache_dir {
+            if dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file() {
+                            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                                if file_name.starts_with("recent") {
+                                    ::log::info!("Cleaning up nodupe cache file: {}", path.display());
+                                    let _ = std::fs::remove_file(path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn after_accept(&self, wl: &mut Worklist) -> anyhow::Result<()> {
         let mut state = self.state.lock().unwrap();
         let now = Self::now_flt();

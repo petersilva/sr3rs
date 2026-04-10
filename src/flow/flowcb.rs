@@ -190,6 +190,11 @@ pub trait FlowCB: Send + Sync {
         Ok(())
     }
 
+    /// Called during component cleanup (e.g. `sr3rs cleanup`).
+    async fn on_cleanup(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Called after messages go through basic accept/reject masks.
     /// Use `worklist.incoming_cursor()` to iterate and filter.
     async fn after_accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> {
