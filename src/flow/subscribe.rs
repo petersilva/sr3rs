@@ -152,28 +152,12 @@ impl Flow for SubscribeFlow {
     }
 
     async fn connect_exchanges(&mut self) -> anyhow::Result<()> {
-        if let Some(broker_cfg) = &self.base.config.broker {
-            log::info!("Connecting to broker for exchange declaration: {}", broker_cfg.redacted());
-            let mut moth = MothFactory::new(broker_cfg, false).await?;
-            let exchange = self.base.config.exchange.clone();
-            
-            log::info!("Declaring primary exchange: {}", exchange);
-            moth.declare_exchange(&exchange, "topic").await?;
-            self.declaration_moths.push(Arc::new(Mutex::new(moth)));
-        }
-
-        if let Some(broker_cfg) = &self.base.config.post_broker {
-            log::info!("Connecting to post_broker for exchange declaration: {}", broker_cfg.redacted());
-            let mut moth = MothFactory::new(broker_cfg, false).await?;
-            let exchange = self.base.config.post_exchange.clone().unwrap_or_else(|| "xpublic".to_string());
-            
-            log::info!("Declaring post exchange: {}", exchange);
-            moth.declare_exchange(&exchange, "topic").await?;
-            self.declaration_moths.push(Arc::new(Mutex::new(moth)));
-        }
-
         let publishers_config = self.base.config.publishers.clone();
         for p_cfg in publishers_config {
+            if !p_cfg.exchange_declare {
+                continue;
+            }
+
             let cred = p_cfg.broker.as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Publisher missing broker credentials"))?;
             
