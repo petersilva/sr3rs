@@ -29,6 +29,10 @@ struct Cli {
     /// Confirm you want to do something dangerous (required when operating on multiple configs)
     #[arg(long = "dangerWillRobinson", global = true, default_value_t = 0)]
     danger_will_robinson: usize,
+ 
+    /// Maximum number of messages to process before exiting
+    #[arg(long = "messageCountMax", global = true)]
+    message_count_max: Option<usize>,
 
     /// Declare users as well as exchanges and queues
     #[arg(long, global = true)]
@@ -251,6 +255,10 @@ async fn main() -> Result<()> {
             let mut config = Config::new();
             config.apply_component_defaults(&component);
             config.load(config_file)?;
+            if let Some(m) = cli.message_count_max {
+                config.message_count_max = m as u32;
+            }
+
             config.finalize()?;
 
             let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&component).join(config.configname.as_deref().unwrap_or("unknown"));
