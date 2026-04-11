@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use sr3rs::Config;
 use sr3rs::flow::{Flow, Worklist, subscribe::SubscribeFlow, sender::SenderFlow};
 use sr3rs::config::paths;
-use sr3rs::utils::{setup_logging, detect_component, resolve_patterns, is_process_running, is_global_config};
+use sr3rs::utils::{setup_logging, detect_component, resolve_patterns, is_process_running };
 use anyhow::Result;
 use std::io::Write;
 use std::process::Command;
@@ -130,9 +130,6 @@ async fn main() -> Result<()> {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 let component = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&component);
@@ -202,9 +199,6 @@ async fn main() -> Result<()> {
             let exe = std::env::current_exe()?;
 
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 
                 let comp = detect_component(&config_file);
                 // Skip interactive components for start command
@@ -273,9 +267,6 @@ async fn main() -> Result<()> {
             let configs = resolve_patterns(config_pattern);
 
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
@@ -326,9 +317,6 @@ async fn main() -> Result<()> {
             println!("{:<35} {:<10} {:<10} {:<10} {:<10}", "----------------", "-----", "---------", "-----", "-------");
 
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
 
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
@@ -473,9 +461,6 @@ async fn main() -> Result<()> {
             let configs = resolve_patterns(config_pattern);
 
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
@@ -505,9 +490,6 @@ async fn main() -> Result<()> {
             let configs = resolve_patterns(config_pattern);
 
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
@@ -566,9 +548,6 @@ async fn main() -> Result<()> {
             }
 
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 let comp = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
@@ -687,9 +666,6 @@ async fn main() -> Result<()> {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_pattern);
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 let component = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&component);
@@ -735,9 +711,6 @@ async fn main() -> Result<()> {
             let configs = resolve_patterns(Some(config));
             
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 let comp = detect_component(&config_file);
                 let mut config_obj = Config::new();
                 config_obj.apply_component_defaults(&comp);
@@ -776,9 +749,6 @@ async fn main() -> Result<()> {
             }
 
             for config_file in configs {
-                if is_global_config(&config_file) {
-                    continue;
-                }
                 
                 log::info!("Removing configuration: {}", config_file);
                 if std::path::Path::new(&config_file).exists() {

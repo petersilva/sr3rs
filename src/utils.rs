@@ -76,7 +76,7 @@ pub fn resolve_patterns(pattern: Option<String>) -> Vec<String> {
     
     if let Some(ref p) = pattern {
         let p_path = std::path::Path::new(p);
-        if p_path.exists() && p_path.is_file() {
+        if p_path.exists() && p_path.is_file() && ! is_global_config(p) {
             results.push(p.clone());
             return results;
         }
