@@ -16,7 +16,7 @@ use anyhow::Result;
 struct Cli {
     /// Path or pattern to the configuration file(s)
     #[arg(short, long)]
-    config: String,
+    config: Vec<String>,
 
     /// Files to announce
     files: Vec<String>,
@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
     };
 
     setup_logging(log_level, None)?;
-    let configs = resolve_patterns(Some(cli.config));
+    let configs = resolve_patterns(cli.config);
     
     for config_file in configs {
         let comp = detect_component(&config_file);

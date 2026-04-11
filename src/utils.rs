@@ -69,52 +69,64 @@ pub fn detect_component(config_path: &str) -> String {
     "subscribe".to_string()
 }
 
-pub fn resolve_patterns(pattern: Option<String>) -> Vec<String> {
+pub fn resolve_patterns(patterns: Vec<String>) -> Vec<String> {
     let config_dir = paths::get_user_config_dir();
     
     let mut results = Vec::new();
     
-    if let Some(ref p) = pattern {
-        let p_path = std::path::Path::new(p);
-        if p_path.exists() && p_path.is_file() && ! is_global_config(p) {
-            results.push(p.clone());
-            return results;
-        }
-    }
-
-    let search_patterns = match pattern {
-        Some(ref p) => {
-            if p.contains('*') {
-                if p.contains('/') {
-                    vec![config_dir.join(p).to_string_lossy().to_string()]
-                } else {
-                    vec![config_dir.join("**").join(p).to_string_lossy().to_string()]
-                }
-            } else {
-                if p.contains('/') {
-                    vec![
-                        config_dir.join(p).to_string_lossy().to_string(),
-                        config_dir.join(format!("{}.conf", p)).to_string_lossy().to_string()
-                    ]
-                } else {
-                    vec![
-                        config_dir.join("**").join(p).to_string_lossy().to_string(),
-                        config_dir.join("**").join(format!("{}.conf", p)).to_string_lossy().to_string()
-                    ]
-                }
-            }
-        }
-        None => vec![config_dir.join("**").join("*.conf").to_string_lossy().to_string()],
-    };
-
-    for p in search_patterns {
-        log::debug!("Searching for configs with pattern: {}", p);
+    if patterns.is_empty() {
+        let p = config_dir.join("**").join("*.conf").to_string_lossy().to_string();
         if let Ok(entries) = glob(&p) {
             for entry in entries.flatten() {
                 if entry.is_file() {
                     let path_str = entry.to_string_lossy().to_string();
                     if !results.contains(&path_str) {
                         results.push(path_str);
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    for p in patterns {
+        let p_path = std::path::Path::new(&p);
+        if p_path.exists() && p_path.is_file() && ! is_global_config(&p) {
+            if !results.contains(&p) {
+                results.push(p.clone());
+            }
+            continue;
+        }
+
+        let search_patterns = if p.contains('*') {
+            if p.contains('/') {
+                vec![config_dir.join(&p).to_string_lossy().to_string()]
+            } else {
+                vec![config_dir.join("**").join(&p).to_string_lossy().to_string()]
+            }
+        } else {
+            if p.contains('/') {
+                vec![
+                    config_dir.join(&p).to_string_lossy().to_string(),
+                    config_dir.join(format!("{}.conf", p)).to_string_lossy().to_string()
+                ]
+            } else {
+                vec![
+                    config_dir.join("**").join(&p).to_string_lossy().to_string(),
+                    config_dir.join("**").join(format!("{}.conf", p)).to_string_lossy().to_string()
+                ]
+            }
+        };
+
+        for sp in search_patterns {
+            log::debug!("Searching for configs with pattern: {}", sp);
+            if let Ok(entries) = glob(&sp) {
+                for entry in entries.flatten() {
+                    if entry.is_file() {
+                        let path_str = entry.to_string_lossy().to_string();
+                        if !results.contains(&path_str) {
+                            results.push(path_str);
+                        }
                     }
                 }
             }

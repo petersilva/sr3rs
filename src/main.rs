@@ -36,67 +36,67 @@ enum Commands {
     /// Show the resolved configuration
     Show {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Run a flow in the foreground
     Foreground {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Start flow instances as daemons
     Start {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Stop flow instances
     Stop {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Show the status of flow instances
     Status {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Enable flow instance(s)
     Enable {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Disable flow instance(s)
     Disable {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Stop and cleanup flow instances and broker resources
     Cleanup {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
         #[arg(long = "dangerWillRobinson", default_value_t = 0)]
         danger_will_robinson: usize,
     },
     /// Remove flow configurations and files
     Remove {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
         #[arg(long = "dangerWillRobinson", default_value_t = 0)]
         danger_will_robinson: usize,
     },
     /// Edit the configuration file(s)
     Edit {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Declare exchanges and queues on the broker
     Declare {
         /// Path or pattern to the configuration file(s)
-        config_pattern: Option<String>,
+        config_patterns: Vec<String>,
     },
     /// Post/Announce specific files
     Post {
         /// Path or pattern to the configuration file(s)
         #[arg(short, long)]
-        config: String,
+        config: Vec<String>,
 
         /// Files to announce
         files: Vec<String>,
@@ -126,9 +126,9 @@ async fn main() -> Result<()> {
     };
 
     match cli.command {
-        Commands::Show { config_pattern } => {
+        Commands::Show { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
             for config_file in configs {
                 let component = detect_component(&config_file);
                 let mut config = Config::new();
@@ -146,9 +146,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Foreground { config_pattern } => {
+        Commands::Foreground { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
             if configs.len() > 1 {
                 anyhow::bail!("Foreground only supports one configuration at a time. Found: {:?}", configs);
             }
@@ -193,9 +193,9 @@ async fn main() -> Result<()> {
                 _ => anyhow::bail!("Unsupported component: {}", component),
             }
         }
-        Commands::Start { config_pattern } => {
+        Commands::Start { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
             let exe = std::env::current_exe()?;
 
             for config_file in configs {
@@ -262,9 +262,9 @@ async fn main() -> Result<()> {
                 println!("Started {} instance(s) of {} as daemons.", num_instances, config_file);
             }
         }
-        Commands::Stop { config_pattern } => {
+        Commands::Stop { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
 
             for config_file in configs {
                 let comp = detect_component(&config_file);
@@ -304,9 +304,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Status { config_pattern } => {
+        Commands::Status { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
 
             if configs.is_empty() {
                 println!("No configurations found in {}", paths::get_user_config_dir().display());
@@ -456,9 +456,9 @@ async fn main() -> Result<()> {
 
             println!();
         }
-        Commands::Enable { config_pattern } => {
+        Commands::Enable { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
 
             for config_file in configs {
                 let comp = detect_component(&config_file);
@@ -485,9 +485,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Disable { config_pattern } => {
+        Commands::Disable { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
 
             for config_file in configs {
                 let comp = detect_component(&config_file);
@@ -537,9 +537,9 @@ async fn main() -> Result<()> {
                 println!("Disabled {}/{}.", comp, config_name);
             }
         }
-        Commands::Cleanup { config_pattern, danger_will_robinson } => {
+        Commands::Cleanup { config_patterns, danger_will_robinson } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
 
             if configs.len() > 1 && danger_will_robinson != configs.len() {
                 log::error!("specify --dangerWillRobinson={} to cleanup multiple configs when > 1 involved. (actual: {}, given: {})", 
@@ -634,9 +634,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Edit { config_pattern } => {
+        Commands::Edit { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
 
             if configs.is_empty() {
                 println!("No configuration files found to edit.");
@@ -662,9 +662,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Declare { config_pattern } => {
+        Commands::Declare { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
             for config_file in configs {
                 let component = detect_component(&config_file);
                 let mut config = Config::new();
@@ -708,7 +708,7 @@ async fn main() -> Result<()> {
         }
         Commands::Post { config, files } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(Some(config));
+            let configs = resolve_patterns(config);
             
             for config_file in configs {
                 let comp = detect_component(&config_file);
@@ -738,9 +738,9 @@ async fn main() -> Result<()> {
                 log::info!("Successfully announced {} files (out of {} found) using {}.", total_announced, total_found, config_file);
             }
         }
-        Commands::Remove { config_pattern, danger_will_robinson } => {
+        Commands::Remove { config_patterns, danger_will_robinson } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_pattern);
+            let configs = resolve_patterns(config_patterns);
 
             if configs.len() > 1 && danger_will_robinson != configs.len() {
                 log::error!("specify --dangerWillRobinson={} to remove multiple configs when > 1 involved. (actual: {}, given: {})", 
