@@ -890,6 +890,9 @@ async fn main() -> Result<()> {
                     log::error!("Failed to declare queues/bindings for {}: {}", config_file, e);
                 } else {
                     println!("Declaration complete for {}.", config_file);
+                    if let Err(e) = flow.config().save_state() {
+                        log::error!("Failed to save state for {}: {}", config_file, e);
+                    }
                 }
                 let _ = flow.shutdown().await;
             }
