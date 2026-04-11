@@ -7,6 +7,7 @@ use crate::flow::{Flow, Worklist, BaseFlow};
 use crate::Config;
 use crate::message::Message;
 use crate::moth::{Moth, MothFactory};
+use crate::utils::redact_url;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -67,7 +68,7 @@ impl SubscribeFlow {
                 broker.user = Some(cred.url.username().to_string());
                 broker.password = cred.url.password().map(String::from);
 
-                log::info!("Connecting publisher to broker: {}", broker.url);
+                log::info!("Connecting publisher to broker: {}", broker.redacted());
                 let moth = MothFactory::new(&broker, false).await?;
 
                 let mut options = serde_json::to_value(&self.base.config).unwrap_or(serde_json::json!({}));
@@ -96,7 +97,7 @@ impl SubscribeFlow {
         broker.user = Some(cred.url.username().to_string());
         broker.password = cred.url.password().map(String::from);
 
-        log::info!("Connecting to broker: {}", broker.url);
+        log::info!("Connecting to broker: {}", broker.redacted());
         
         let mut moth = MothFactory::new(&broker, true).await?;
 
@@ -152,7 +153,7 @@ impl Flow for SubscribeFlow {
 
     async fn connect_exchanges(&mut self) -> anyhow::Result<()> {
         if let Some(broker_cfg) = &self.base.config.broker {
-            log::info!("Connecting to broker for exchange declaration: {}", broker_cfg.url);
+            log::info!("Connecting to broker for exchange declaration: {}", broker_cfg.redacted());
             let mut moth = MothFactory::new(broker_cfg, false).await?;
             let exchange = self.base.config.exchange.clone();
             
@@ -162,7 +163,7 @@ impl Flow for SubscribeFlow {
         }
 
         if let Some(broker_cfg) = &self.base.config.post_broker {
-            log::info!("Connecting to post_broker for exchange declaration: {}", broker_cfg.url);
+            log::info!("Connecting to post_broker for exchange declaration: {}", broker_cfg.redacted());
             let mut moth = MothFactory::new(broker_cfg, false).await?;
             let exchange = self.base.config.post_exchange.clone().unwrap_or_else(|| "xpublic".to_string());
             
@@ -180,7 +181,7 @@ impl Flow for SubscribeFlow {
             broker.user = Some(cred.url.username().to_string());
             broker.password = cred.url.password().map(String::from);
 
-            log::info!("Connecting publisher to broker for exchange declaration: {}", broker.url);
+            log::info!("Connecting publisher to broker for exchange declaration: {}", broker.redacted());
             let mut moth = MothFactory::new(&broker, false).await?;
 
             for exchange in &p_cfg.exchange {
@@ -250,7 +251,7 @@ impl Flow for SubscribeFlow {
         // 3. Standalone cleanup connections
         for (broker_url, queues) in broker_map {
             let broker = crate::broker::Broker::parse(&broker_url)?;
-            log::info!("Connecting to broker for standalone queue deletion: {}", broker_url);
+            log::info!("Connecting to broker for standalone queue deletion: {}", redact_url(&broker_url));
             if let Ok(mut moth) = MothFactory::new(&broker, false).await {
                 for q_name in queues {
                     if !deleted_queues.contains(&q_name) {
@@ -299,7 +300,7 @@ impl Flow for SubscribeFlow {
                     }
                     Ok(Ok(None)) => break,
                     Ok(Err(e)) => {
-                        log::error!("GATHER: error from {}: {}", consumer.broker_url, e);
+                        log::error!("GATHER: error from {}: {}", redact_url(&consumer.broker_url), e);
                         break;
                     }
                     Err(_) => break, // Timeout

@@ -20,6 +20,7 @@ use crate::flow::log::FlowLog;
 use crate::flow::flowcb::{IncomingCursor, OkCursor, FailedCursor};
 use crate::transfer::get_transfer;
 use crate::flow::metrics::Metrics;
+use crate::utils::redact_url;
 
 #[derive(Debug, Default)]
 pub struct Worklist {
@@ -155,7 +156,7 @@ pub trait Flow: Send + Sync {
             let scheme = match url::Url::parse(&m.base_url) {
                 Ok(u) => u.scheme().to_string(),
                 Err(_) => {
-                    ::log::error!("WORK: invalid base_url: {}", m.base_url);
+                    ::log::error!("WORK: invalid base_url: {}", redact_url(&m.base_url));
                     worklist.failed.push(m);
                     failed_count += 1;
                     continue;
@@ -237,7 +238,7 @@ pub trait Flow: Send + Sync {
             for (idx, pub_mutex) in publishers.iter().enumerate() {
                 let mut p = pub_mutex.lock().await;
                 if let Err(e) = p.publish_mut(&m).await {
-                    ::log::error!("POST: failed to publish to {}: {}", p.broker_url, e);
+                    ::log::error!("POST: failed to publish to {}: {}", redact_url(&p.broker_url), e);
                     failed_indices.push(idx);
                 }
             }

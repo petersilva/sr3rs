@@ -5,6 +5,7 @@
 
 use crate::flow::Worklist;
 use crate::Config;
+use crate::utils::redact_url;
 use std::time::Instant;
 use chrono::Utc;
 
@@ -51,7 +52,7 @@ impl FlowLog {
         let now = Utc::now();
 
         for m in &worklist.rejected {
-            log::debug!("rejected: {}/{}", m.base_url, m.rel_path);
+            log::debug!("rejected: {}/{}", redact_url(&m.base_url), m.rel_path);
         }
 
         for m in &worklist.incoming {
@@ -60,7 +61,7 @@ impl FlowLog {
             if lag > self.lag_max {
                 self.lag_max = lag;
             }
-            log::info!("accepted: (lag: {:.2}s) {}/{}", lag, m.base_url, m.rel_path);
+            log::info!("accepted: (lag: {:.2}s) {}/{}", lag, redact_url(&m.base_url), m.rel_path);
         }
     }
 
@@ -72,7 +73,7 @@ impl FlowLog {
                     self.file_bytes += size;
                 }
             }
-            log::info!("worked ok: {}/{}", m.base_url, m.rel_path);
+            log::info!("worked ok: {}/{}", redact_url(&m.base_url), m.rel_path);
         }
     }
 

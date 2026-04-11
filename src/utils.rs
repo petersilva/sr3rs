@@ -155,3 +155,14 @@ pub fn is_global_config(path_str: &str) -> bool {
     }
     false
 }
+
+pub fn redact_url(url_str: &str) -> String {
+    if let Ok(mut url) = url::Url::parse(url_str) {
+        if url.password().is_some() {
+            let _ = url.set_password(Some(""));
+        }
+        url.to_string()
+    } else {
+        url_str.to_string()
+    }
+}

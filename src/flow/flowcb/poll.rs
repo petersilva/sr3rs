@@ -6,6 +6,7 @@
 use crate::flow::flowcb::FlowCB;
 use crate::flow::Worklist;
 use crate::Config;
+use crate::utils::redact_url;
 use async_trait::async_trait;
 
 pub struct PollPlugin {
@@ -30,7 +31,7 @@ impl FlowCB for PollPlugin {
 
     async fn gather(&mut self, _worklist: &mut Worklist) -> anyhow::Result<()> {
         if let Some(poll_url) = &self.config.poll_url {
-            ::log::info!("POLL: Native polling for {} is a stub. Use Python plugins for full functionality.", poll_url);
+            ::log::info!("POLL: Native polling for {} is a stub. Use Python plugins for full functionality.", redact_url(poll_url));
         } else {
             ::log::warn!("POLL: No pollUrl configured.");
         }

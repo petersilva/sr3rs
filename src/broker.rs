@@ -112,6 +112,14 @@ impl Broker {
         }
         s
     }
+
+    pub fn redacted(&self) -> String {
+        let mut u = self.url.clone();
+        if u.password().is_some() {
+            let _ = u.set_password(Some(""));
+        }
+        u.to_string()
+    }
 }
 
 #[cfg(test)]

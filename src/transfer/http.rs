@@ -5,6 +5,7 @@
 
 use crate::message::Message;
 use crate::transfer::Transfer;
+use crate::utils::redact_url;
 use async_trait::async_trait;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
@@ -26,7 +27,7 @@ impl HttpTransfer {
 impl Transfer for HttpTransfer {
     async fn get(&self, msg: &Message, local_file: &Path) -> anyhow::Result<u64> {
         let url = format!("{}{}", msg.base_url, msg.rel_path);
-        log::debug!("HTTP GET: {}", url);
+        log::debug!("HTTP GET: {}", redact_url(&url));
 
         let response = self.client.get(&url).send().await?;
         if !response.status().is_success() {

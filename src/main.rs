@@ -139,7 +139,7 @@ async fn declare_rabbitmq_user(admin_broker: &sr3rs::broker::Broker, username: &
     let admin_user = admin_broker.url.username();
     let admin_pass = admin_broker.url.password().unwrap_or("");
 
-    log::info!("Declaring user {} with role {} on broker {}", username, role, hostname);
+    log::info!("Declaring user {} with role {} on broker {}", username, role, admin_broker.redacted());
 
     // 1. Put user
     let user_url = format!("{}/api/users/{}", base_url, username);
