@@ -923,18 +923,22 @@ async fn main() -> Result<()> {
                 let mut flow = SubscribeFlow::new(config_obj);
                 let mut total_announced = 0;
                 let mut total_found = 0;
-                
+
                 flow.connect().await?;
                 loop {
                     let mut worklist = Worklist::new();
                     let count = flow.run_once(&mut worklist).await?;
+                    total_found += count; // Actually, gather gives us count in incoming, run_once returns total processed
+
+                    // Let's assume the gather puts it in worklist.incoming, then run_once moves it to worklist.ok
+                    // Actually run_once is returning `processed`
+
                     if count == 0 {
+                        // Gather returned 0, we are done
                         break;
                     }
-                    total_found += count;
-                    total_announced += worklist.ok.len();
-                }
-                flow.shutdown().await?;
+                    total_announced += count;
+                }                flow.shutdown().await?;
                 log::info!("Successfully announced {} files (out of {} found) using {}.", total_announced, total_found, config_file);
             }
         }

@@ -49,12 +49,12 @@ impl GatherFilePlugin {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-
                 if path.is_dir() {
                     if self.config.recursive {
-                        messages.extend(self.walk(&path));
+                        let mut sub = self.walk(&path);
+                        messages.append(&mut sub);
                     }
-                } else {
+                } else if path.is_file() {
                     if let Ok(msg) = self.make_message(&path) {
                         messages.push(msg);
                     }
@@ -180,14 +180,13 @@ impl FlowCB for GatherFilePlugin {
                  for path_str in &self.config.post_paths {
                      let p = Path::new(path_str);
                      if p.exists() {
-                        ::log::info!("GatherFile: scanning path from CLI: {}", path_str);
-                        messages.extend(self.walk(p));
+                        let mut walked = self.walk(p);
+                        messages.append(&mut walked);
                      } else {
                         ::log::warn!("GatherFile: CLI path does not exist: {}", path_str);
                      }
                  }
-                 ::log::info!("GatherFile: found {} files in CLI paths.", messages.len());
-             } else {
+             } else if !self.initial_scan_done {
                  let watch_dir = self.config.directory.clone();
                  if watch_dir.exists() {
                      messages = self.walk(&watch_dir);
@@ -202,18 +201,18 @@ impl FlowCB for GatherFilePlugin {
              }
 
              self.initial_scan_done = true;
-             
+
              if !messages.is_empty() {
-                if messages.len() > batch_size {
-                    let (batch, rest) = messages.split_at(batch_size);
-                    worklist.incoming.extend(batch.iter().cloned());
-                    self.queued_messages.extend(rest.iter().cloned());
-                } else {
+                 ::log::debug!("GatherFile: adding {} messages to queue", messages.len());
+                 if messages.len() > batch_size {
+                    worklist.incoming.extend(messages.drain(0..batch_size));
+                    self.queued_messages.extend(messages);
+                 } else {
                     worklist.incoming.extend(messages);
-                }
-                self.primed = true;
-                return Ok(());
+                 }
              }
+             self.primed = true;
+             return Ok(());
         }
 
         // 3. Process kernel events if available
