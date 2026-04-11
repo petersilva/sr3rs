@@ -111,6 +111,11 @@ pub struct Config {
 
     pub flow_callbacks: Vec<String>,
 
+    pub admin: Option<Broker>,
+    pub feeder: Option<Broker>,
+    pub declared_users: HashMap<String, String>,
+    pub declared_exchanges: Vec<String>,
+
     pub options: HashMap<String, String>,
     pub config_search_paths: Vec<PathBuf>,
     pub rand4: String,
@@ -187,6 +192,11 @@ impl Default for Config {
             scheduled_time: Vec::new(),
 
             flow_callbacks: Vec::new(),
+
+            admin: None,
+            feeder: None,
+            declared_users: HashMap::new(),
+            declared_exchanges: Vec::new(),
 
             options: HashMap::new(),
             config_search_paths: vec![PathBuf::from(".")],
@@ -376,20 +386,70 @@ impl Config {
                 None
             };
 
-            if k == "declare" && parts.len() > 2 && parts[1] == "env" {
-                let env_part = parts[2];
-                let kv: Vec<&str> = env_part.splitn(2, '=').collect();
-                if kv.len() == 2 {
-                    let env_k = kv[0];
-                    let env_v = variable_expansion::expand_variables(kv[1], &vars);
-                    std::env::set_var(env_k, &env_v);
-                    vars.insert(env_k.to_string(), env_v);
-                    log::debug!("CONFIG: declared env {}={}", env_k, vars.get(env_k).unwrap());
-                }
-                continue;
-            }
-
             let result = match k {
+                "admin" => {
+                    if let Some(ref val) = v {
+                        self.admin = Some(Broker::parse(val).map_err(|e| ConfigError::ParseContext {
+                            file: filename.to_string(),
+                            line: line_no,
+                            message: format!("Admin broker error: {} (raw: {})", e, val),
+                        })?);
+                    }
+                    Ok(())
+                }
+                "feeder" | "manager" => {
+                    if let Some(ref val) = v {
+                        let b = Broker::parse(val).map_err(|e| ConfigError::ParseContext {
+                            file: filename.to_string(),
+                            line: line_no,
+                            message: format!("Feeder broker error: {} (raw: {})", e, val),
+                        })?;
+                        if let Some(ref user) = b.user {
+                            self.declared_users.insert(user.clone(), k.to_string());
+                        }
+                        self.feeder = Some(b);
+                    }
+                    Ok(())
+                }
+                "declare" => {
+                    if parts.len() > 2 {
+                        match parts[1] {
+                            "env" | "envvar" | "var" | "value" => {
+                                let env_part = parts[2];
+                                let kv: Vec<&str> = env_part.splitn(2, '=').collect();
+                                if kv.len() == 2 {
+                                    let env_k = kv[0];
+                                    let env_v = variable_expansion::expand_variables(kv[1], &vars);
+                                    std::env::set_var(env_k, &env_v);
+                                    vars.insert(env_k.to_string(), env_v);
+                                }
+                            }
+                            "source" | "subscriber" | "subscribe" => {
+                                let username = parts[2];
+                                self.declared_users.insert(username.to_string(), parts[1].to_string());
+                                if parts[1] == "source" {
+                                    let ex = format!("xs_{}", username);
+                                    if !self.declared_exchanges.contains(&ex) {
+                                        self.declared_exchanges.push(ex);
+                                    }
+                                }
+                            }
+                            "exchange" => {
+                                let ex = parts[2].to_string();
+                                if !self.declared_exchanges.contains(&ex) {
+                                    self.declared_exchanges.push(ex);
+                                }
+                            }
+                            "option" | "o" => {
+                                if parts.len() > 3 {
+                                    self.options.insert(parts[2].to_string(), parts[3..].join(" "));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(())
+                }
                 "broker" => {
                     if let Some(ref val) = v {
                         self.broker = Some(Broker::parse(val).map_err(|e| ConfigError::ParseContext {
@@ -983,6 +1043,14 @@ impl Config {
 
         let cred_path = self.get_credential_path();
         let _ = self.credentials.load(&cred_path);
+
+        if let Some(ref pb) = self.post_broker {
+            if self.post_exchange.is_none() {
+                if let Some(ref user) = pb.user {
+                    self.post_exchange = Some(format!("xs_{}", user));
+                }
+            }
+        }
 
         if self.message_count_max > 0 && self.batch > self.message_count_max {
             log::info!("{}/{} overriding batch for consistency with messageCountMax: {}", 

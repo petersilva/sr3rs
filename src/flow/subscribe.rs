@@ -46,66 +46,42 @@ impl SubscribeFlow {
     }
 
     pub async fn connect_full(&mut self, declare: bool, consume: bool) -> anyhow::Result<()> {
-        let subscriptions_count = self.base.config.subscriptions.len();
-        if subscriptions_count > 0 {
+        if declare {
+            self.connect_exchanges().await?;
+            self.connect_queues().await?;
+        } else if consume {
+            let subscriptions_count = self.base.config.subscriptions.len();
             for idx in 0..subscriptions_count {
-                self.connect_subscription_full(idx, declare, consume).await?;
+                self.connect_subscription_full(idx, false, true).await?;
             }
-        } else if let Some(broker_cfg) = &self.base.config.broker {
-            if declare {
-                log::info!("Connecting to broker for declaration: {}", broker_cfg.url);
-                let mut moth = MothFactory::new(broker_cfg, false).await?;
-                let exchange = self.base.config.exchange.clone();
+        }
+
+        // Always connect publishers if consuming or explicitly requested
+        if consume {
+            let publishers_config = self.base.config.publishers.clone();
+            for (idx, p_cfg) in publishers_config.into_iter().enumerate() {
+                let cred = p_cfg.broker.as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Publisher missing broker credentials"))?;
                 
-                log::info!("Declaring primary exchange: {}", exchange);
-                moth.declare_exchange(&exchange, "topic").await?;
-                self.declaration_moths.push(Arc::new(Mutex::new(moth)));
-            }
-        }
+                let mut broker = crate::broker::Broker::parse(&cred.url.to_string())?;
+                broker.user = Some(cred.url.username().to_string());
+                broker.password = cred.url.password().map(String::from);
 
-        let publishers_config = self.base.config.publishers.clone();
-        if publishers_config.is_empty() {
-             if let Some(broker_cfg) = &self.base.config.post_broker {
-                if declare {
-                    log::info!("Connecting to post_broker for declaration: {}", broker_cfg.url);
-                    let mut moth = MothFactory::new(broker_cfg, false).await?;
-                    let exchange = self.base.config.post_exchange.clone().unwrap_or_else(|| "xpublic".to_string());
-                    
-                    log::info!("Declaring post exchange: {}", exchange);
-                    moth.declare_exchange(&exchange, "topic").await?;
-                    self.declaration_moths.push(Arc::new(Mutex::new(moth)));
+                log::info!("Connecting publisher to broker: {}", broker.url);
+                let moth = MothFactory::new(&broker, false).await?;
+
+                let mut options = serde_json::to_value(&self.base.config).unwrap_or(serde_json::json!({}));
+                if let Some(obj) = options.as_object_mut() {
+                    obj.insert("publisher_index".to_string(), serde_json::json!(idx));
                 }
-             }
-        }
 
-        for (idx, p_cfg) in publishers_config.into_iter().enumerate() {
-            let cred = p_cfg.broker.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Publisher missing broker credentials"))?;
-            
-            let mut broker = crate::broker::Broker::parse(&cred.url.to_string())?;
-            broker.user = Some(cred.url.username().to_string());
-            broker.password = cred.url.password().map(String::from);
-
-            log::info!("Connecting publisher to broker: {}", broker.url);
-            let mut moth = MothFactory::new(&broker, false).await?;
-
-            if declare {
-                for exchange in &p_cfg.exchange {
-                    moth.declare_exchange(exchange, "topic").await?;
-                }
+                self.publishers.push(Arc::new(Mutex::new(MothPublisher {
+                    options,
+                    moth,
+                    broker_url: cred.url.to_string(),
+                    exchanges: p_cfg.exchange.clone(),
+                })));
             }
-
-            let mut options = serde_json::to_value(&self.base.config).unwrap_or(serde_json::json!({}));
-            if let Some(obj) = options.as_object_mut() {
-                obj.insert("publisher_index".to_string(), serde_json::json!(idx));
-            }
-
-            self.publishers.push(Arc::new(Mutex::new(MothPublisher {
-                options,
-                moth,
-                broker_url: cred.url.to_string(),
-                exchanges: p_cfg.exchange.clone(),
-            })));
         }
 
         Ok(())
@@ -172,6 +148,57 @@ impl Flow for SubscribeFlow {
 
     fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> {
         self.base.callbacks.clone()
+    }
+
+    async fn connect_exchanges(&mut self) -> anyhow::Result<()> {
+        if let Some(broker_cfg) = &self.base.config.broker {
+            log::info!("Connecting to broker for exchange declaration: {}", broker_cfg.url);
+            let mut moth = MothFactory::new(broker_cfg, false).await?;
+            let exchange = self.base.config.exchange.clone();
+            
+            log::info!("Declaring primary exchange: {}", exchange);
+            moth.declare_exchange(&exchange, "topic").await?;
+            self.declaration_moths.push(Arc::new(Mutex::new(moth)));
+        }
+
+        if let Some(broker_cfg) = &self.base.config.post_broker {
+            log::info!("Connecting to post_broker for exchange declaration: {}", broker_cfg.url);
+            let mut moth = MothFactory::new(broker_cfg, false).await?;
+            let exchange = self.base.config.post_exchange.clone().unwrap_or_else(|| "xpublic".to_string());
+            
+            log::info!("Declaring post exchange: {}", exchange);
+            moth.declare_exchange(&exchange, "topic").await?;
+            self.declaration_moths.push(Arc::new(Mutex::new(moth)));
+        }
+
+        let publishers_config = self.base.config.publishers.clone();
+        for p_cfg in publishers_config {
+            let cred = p_cfg.broker.as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Publisher missing broker credentials"))?;
+            
+            let mut broker = crate::broker::Broker::parse(&cred.url.to_string())?;
+            broker.user = Some(cred.url.username().to_string());
+            broker.password = cred.url.password().map(String::from);
+
+            log::info!("Connecting publisher to broker for exchange declaration: {}", broker.url);
+            let mut moth = MothFactory::new(&broker, false).await?;
+
+            for exchange in &p_cfg.exchange {
+                log::info!("Declaring publisher exchange: {}", exchange);
+                moth.declare_exchange(exchange, "topic").await?;
+            }
+            self.declaration_moths.push(Arc::new(Mutex::new(moth)));
+        }
+
+        Ok(())
+    }
+
+    async fn connect_queues(&mut self) -> anyhow::Result<()> {
+        let subscriptions_count = self.base.config.subscriptions.len();
+        for idx in 0..subscriptions_count {
+            self.connect_subscription_full(idx, true, false).await?;
+        }
+        Ok(())
     }
 
     async fn cleanup(&self) -> anyhow::Result<()> {

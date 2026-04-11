@@ -29,6 +29,10 @@ struct Cli {
     /// Confirm you want to do something dangerous (required when operating on multiple configs)
     #[arg(long = "dangerWillRobinson", global = true, default_value_t = 0)]
     danger_will_robinson: usize,
+
+    /// Declare users as well as exchanges and queues
+    #[arg(long, global = true)]
+    users: bool,
 }
 
 #[derive(Subcommand)]
@@ -107,6 +111,91 @@ enum Commands {
         config_file: String,
         instance: u32,
     }
+}
+
+fn get_host_list(cfg: &Config, admins: &std::collections::HashMap<String, sr3rs::broker::Broker>) -> Vec<String> {
+    let mut hs = std::collections::HashSet::new();
+    if let Some(b) = &cfg.broker { if let Some(h) = b.url.host_str() { hs.insert(h.to_string()); } }
+    for sub in &cfg.subscriptions { if let Some(c) = &sub.broker { if let Some(h) = c.url.host_str() { hs.insert(h.to_string()); } } }
+    for p in &cfg.publishers { if let Some(c) = &p.broker { if let Some(h) = c.url.host_str() { hs.insert(h.to_string()); } } }
+    
+    if let Some(b) = &cfg.admin { if let Some(h) = b.url.host_str() { hs.insert(h.to_string()); } }
+    if let Some(b) = &cfg.feeder { if let Some(h) = b.url.host_str() { hs.insert(h.to_string()); } }
+
+    if hs.is_empty() {
+        admins.keys().cloned().collect()
+    } else {
+        hs.into_iter().collect()
+    }
+}
+
+async fn declare_rabbitmq_user(admin_broker: &sr3rs::broker::Broker, username: &str, password: &str, role: &str) -> Result<()> {
+    let client = reqwest::Client::new();
+    let hostname = admin_broker.url.host_str().unwrap_or("localhost");
+    let port = if admin_broker.url.scheme() == "amqps" { 15671 } else { 15672 };
+    let scheme = if admin_broker.url.scheme() == "amqps" { "https" } else { "http" };
+    
+    let base_url = format!("{}://{}:{}", scheme, hostname, port);
+    let admin_user = admin_broker.url.username();
+    let admin_pass = admin_broker.url.password().unwrap_or("");
+
+    log::info!("Declaring user {} with role {} on broker {}", username, role, hostname);
+
+    // 1. Put user
+    let user_url = format!("{}/api/users/{}", base_url, username);
+    let tags = if role == "admin" { "administrator" } else { "" };
+    let user_body = serde_json::json!({
+        "password": password,
+        "tags": tags
+    });
+
+    let res = client.put(&user_url)
+        .basic_auth(admin_user, Some(admin_pass))
+        .json(&user_body)
+        .send()
+        .await?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await?;
+        anyhow::bail!("Failed to declare user {}: {} {}", username, user_url, err_text);
+    }
+
+    // 2. Put permissions
+    let (c, w, r) = match role {
+        "admin" | "feeder" | "manager" => (".*".to_string(), ".*".to_string(), ".*".to_string()),
+        "source" => (
+            format!("^q_{}.*|^xs_{}.*", username, username),
+            format!("^q_{}.*|^xs_{}.*", username, username),
+            format!("^q_{}.*|^x[lrs]_{}.*|^x.*public$", username, username)
+        ),
+        "subscribe" | "subscriber" => (
+            format!("^q_{}.*", username),
+            format!("^q_{}.*|^xs_{}$", username, username),
+            format!("^q_{}.*|^x[lrs]_{}.*|^x.*public$", username, username)
+        ),
+        _ => (".*".to_string(), ".*".to_string(), ".*".to_string()),
+    };
+
+    let vhost = "/"; // SR3 defaults to / for global user declarations
+    let permissions_url = format!("{}/api/permissions/{}/{}", base_url, urlencoding::encode(vhost), username);
+    let permissions_body = serde_json::json!({
+        "configure": c,
+        "write": w,
+        "read": r
+    });
+
+    let res = client.put(&permissions_url)
+        .basic_auth(admin_user, Some(admin_pass))
+        .json(&permissions_body)
+        .send()
+        .await?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await?;
+        anyhow::bail!("Failed to declare permissions for {}: {}", username, err_text);
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -664,46 +753,145 @@ async fn main() -> Result<()> {
         }
         Commands::Declare { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
-            for config_file in configs {
-                let component = detect_component(&config_file);
+            let configs = resolve_patterns(config_patterns.clone());
+
+            let mut admins = std::collections::HashMap::new();
+            let mut unique_users = std::collections::HashSet::new();
+            let mut unique_exchanges = std::collections::HashSet::new();
+
+            // Load all credentials once
+            let mut cred_db = sr3rs::config::credentials::CredentialDb::new();
+            let cred_file = paths::get_user_config_dir().join("credentials.conf");
+            if let Err(e) = cred_db.load(&cred_file) {
+                log::warn!("Failed to load credentials from {}: {}", cred_file.display(), e);
+            }
+
+            // Phase 1: Collect all admin brokers and feeders from ALL configs to build the admins map
+            log::debug!("Phase 1: Collecting admin brokers...");
+            for config_file in &configs {
+                let mut cfg = Config::new();
+                let comp = detect_component(config_file);
+                cfg.apply_component_defaults(&comp);
+                if cfg.load(config_file).is_ok() && cfg.finalize().is_ok() {
+                    if let Some(ref b) = cfg.admin {
+                        let host = b.url.host_str().unwrap_or("localhost").to_string();
+                        // Admin takes precedence over feeder
+                        admins.insert(host, b.clone());
+                    }
+                    if let Some(ref b) = cfg.feeder {
+                        let host = b.url.host_str().unwrap_or("localhost").to_string();
+                        if !admins.contains_key(&host) {
+                            admins.insert(host, b.clone());
+                        }
+                    }
+                }
+            }
+
+            // Phase 2: Resolve admin passwords
+            log::debug!("Phase 2: Resolving admin passwords...");
+            for admin in admins.values_mut() {
+                if admin.url.password().is_none() {
+                    if let Some(cred) = cred_db.get(&admin.url.to_string()) {
+                        if let Some(pw) = cred.url.password() {
+                            let _ = admin.url.set_password(Some(pw));
+                        }
+                    }
+                }
+            }
+
+            // Phase 3: Collect unique users and admin exchanges across all configs
+            log::debug!("Phase 3: Collecting unique users and admin exchanges...");
+            for config_file in &configs {
+                let mut cfg = Config::new();
+                let comp = detect_component(config_file);
+                cfg.apply_component_defaults(&comp);
+                if cfg.load(config_file).is_ok() && cfg.finalize().is_ok() {
+                    // Collect users
+                    for (username, role) in &cfg.declared_users {
+                        let host_list = get_host_list(&cfg, &admins);
+                        for host in host_list {
+                            unique_users.insert((username.clone(), host, role.clone()));
+                        }
+                    }
+
+                    // Collect admin exchanges
+                    for exchange in &cfg.declared_exchanges {
+                        if let Some(admin_broker) = &cfg.admin {
+                            let host = admin_broker.url.host_str().unwrap_or("localhost").to_string();
+                            unique_exchanges.insert((exchange.clone(), host));
+                        } else if let Some(feeder_broker) = &cfg.feeder {
+                            let host = feeder_broker.url.host_str().unwrap_or("localhost").to_string();
+                            unique_exchanges.insert((exchange.clone(), host));
+                        }
+                    }
+                }
+            }
+
+            // Phase 4: Declare Users if requested
+            if cli.users {
+                log::info!("Phase 4: Declaring users...");
+                for (username, host, role) in &unique_users {
+                    if let Some(admin_broker) = admins.get(host) {
+                        let dummy_url = format!("amqp://{}@{}/", username, host);
+                        if let Some(user_cred) = cred_db.get(&dummy_url) {
+                            let password = user_cred.url.password().unwrap_or("");
+                            if let Err(e) = declare_rabbitmq_user(admin_broker, username, password, role).await {
+                                log::error!("Failed to declare user {}: {}", username, e);
+                            }
+                        } else {
+                            log::warn!("No password found for user {} on {}, skipping user declaration.", username, host);
+                        }
+                    } else {
+                        log::warn!("No admin broker found for host {}, cannot declare user {}.", host, username);
+                    }
+                }
+            }
+
+            // Phase 5: Declare Admin Exchanges
+            log::info!("Phase 5: Declaring admin exchanges...");
+            for (exchange, host) in &unique_exchanges {
+                 if let Some(broker) = admins.get(host) {
+                     log::info!("Declaring admin exchange {} on {}", exchange, host);
+                     if let Ok(mut moth) = sr3rs::moth::MothFactory::new(broker, false).await {
+                         if let Err(e) = moth.declare_exchange(exchange, "topic").await {
+                             log::error!("Failed to declare admin exchange {}: {}", exchange, e);
+                         }
+                         let _ = moth.close().await;
+                     }
+                 }
+            }
+
+            // Phase 6: Declare flow exchanges for all configs
+            log::info!("Phase 6: Declaring flow exchanges...");
+            let mut flows: Vec<(String, String, Box<dyn Flow>)> = Vec::new();
+
+            for config_file in &configs {
+                let component = detect_component(config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&component);
-                if let Err(e) = config.load(&config_file) {
-                    log::error!("Failed to load {}: {}", config_file, e);
-                    continue;
-                }
-                if let Err(e) = config.finalize() {
-                    log::error!("Failed to finalize {}: {}", config_file, e);
-                    continue;
-                }
+                if let Err(_) = config.load(config_file) { continue; }
+                if let Err(_) = config.finalize() { continue; }
 
-                // Save state for declaration
-                if let Err(e) = config.save_state() {
-                    log::error!("Failed to save state for {}: {}", config_file, e);
-                    continue;
-                }
+                let mut flow: Box<dyn Flow> = match component.as_str() {
+                    "sender" => Box::new(SenderFlow::new(config)),
+                    _ => Box::new(SubscribeFlow::new(config)),
+                };
 
-                match component.as_str() {
-                    "sender" => {
-                        let mut flow = SenderFlow::new(config);
-                        if let Err(e) = flow.connect_full(true, false).await {
-                            log::error!("Failed to connect for {}: {}", config_file, e);
-                            continue;
-                        }
-                        flow.shutdown().await?;
-                    }
-                    "subscribe" | "shovel" | "post" | "cpost" | "cpump" | "poll" | "report" | "sarra" | "watch" | "winnow" => {
-                        let mut flow = SubscribeFlow::new(config);
-                        if let Err(e) = flow.connect().await {
-                            log::error!("Failed to connect for {}: {}", config_file, e);
-                            continue;
-                        }
-                        flow.shutdown().await?;
-                    }
-                    _ => log::warn!("Declare not implemented for component: {}", component),
+                if let Err(e) = flow.connect_exchanges().await {
+                    log::error!("Failed to declare exchanges for {}: {}", config_file, e);
                 }
-                println!("Declaration complete for {}.", config_file);
+                flows.push((config_file.clone(), component, flow));
+            }
+
+            // Phase 7: Declare queues and bindings for all configs
+            log::info!("Phase 7: Declaring queues and bindings...");
+            for (config_file, _component, mut flow) in flows {
+                if let Err(e) = flow.connect_queues().await {
+                    log::error!("Failed to declare queues/bindings for {}: {}", config_file, e);
+                } else {
+                    println!("Declaration complete for {}.", config_file);
+                }
+                let _ = flow.shutdown().await;
             }
         }
         Commands::Post { config, files } => {

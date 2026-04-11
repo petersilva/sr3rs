@@ -457,9 +457,17 @@ pub trait Flow: Send + Sync {
         Ok(())
     }
 
-    async fn declare(&self) -> anyhow::Result<()> {
+    async fn declare(&mut self) -> anyhow::Result<()> {
+        self.connect_exchanges().await?;
+        self.connect_queues().await?;
         Ok(())
     }
+
+    /// Declare exchanges used by this flow
+    async fn connect_exchanges(&mut self) -> anyhow::Result<()>;
+
+    /// Declare queues and bindings used by this flow
+    async fn connect_queues(&mut self) -> anyhow::Result<()>;
 
     async fn cleanup(&self) -> anyhow::Result<()> {
         Ok(())
@@ -515,6 +523,8 @@ impl Flow for BaseFlow {
     async fn gather(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
     async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    async fn connect_exchanges(&mut self) -> anyhow::Result<()> { Ok(()) }
+    async fn connect_queues(&mut self) -> anyhow::Result<()> { Ok(()) }
 }
 
 #[cfg(test)]
