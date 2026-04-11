@@ -219,6 +219,7 @@ async fn main() -> Result<()> {
             setup_logging(log_level, None)?;
             let configs = resolve_patterns(config_patterns);
             for config_file in configs {
+                log::debug!("Resolved config: {}", config_file);
                 let component = detect_component(&config_file);
                 let mut config = Config::new();
                 config.apply_component_defaults(&component);

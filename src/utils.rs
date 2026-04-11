@@ -80,7 +80,7 @@ pub fn resolve_patterns(patterns: Vec<String>) -> Vec<String> {
             for entry in entries.flatten() {
                 if entry.is_file() {
                     let path_str = entry.to_string_lossy().to_string();
-                    if !results.contains(&path_str) {
+                    if !is_global_config(&path_str) && !results.contains(&path_str) {
                         results.push(path_str);
                     }
                 }
@@ -124,7 +124,7 @@ pub fn resolve_patterns(patterns: Vec<String>) -> Vec<String> {
                 for entry in entries.flatten() {
                     if entry.is_file() {
                         let path_str = entry.to_string_lossy().to_string();
-                        if !results.contains(&path_str) {
+                        if !is_global_config(&path_str) && !results.contains(&path_str) {
                             results.push(path_str);
                         }
                     }
