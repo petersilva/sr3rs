@@ -36,11 +36,12 @@ impl SenderFlow {
     pub async fn connect_full(&mut self, declare: bool, consume: bool) -> anyhow::Result<()> {
         if declare {
             self.connect_exchanges().await?;
-            self.connect_queues().await?;
-        } else if consume {
+        }
+        
+        if declare || consume {
             let subscriptions_count = self.base.config.subscriptions.len();
             for idx in 0..subscriptions_count {
-                self.connect_subscription_full(idx, false, true).await?;
+                self.connect_subscription_full(idx, declare, consume).await?;
             }
         }
 
@@ -85,6 +86,7 @@ impl SenderFlow {
         log::info!("Connecting to broker: {}", broker.redacted());
         
         let mut moth = MothFactory::new(&broker, true).await?;
+        moth.set_consume_options(&sub.queue.name, self.base.config.prefetch as u16);
 
         if declare {
             let topics: Vec<String> = sub.bindings.iter().map(|b| b.topic.clone()).collect();

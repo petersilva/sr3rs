@@ -14,6 +14,9 @@ pub mod mqtt;
 
 #[async_trait]
 pub trait Moth: Send + Sync {
+    /// Initialize consumer settings
+    fn set_consume_options(&mut self, queue_name: &str, prefetch: u16);
+
     /// Subscribe to topics (for consumers)
     async fn subscribe(&mut self, topics: &[String], exchange: &str, queue_name: &str) -> Result<()>;
     

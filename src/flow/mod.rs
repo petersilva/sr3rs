@@ -277,7 +277,9 @@ pub trait Flow: Send + Sync {
         if !active {
             if config.component == "poll" {
                 // In passive mode, POLL still gathers from the broker to warm its cache.
+                ::log::debug!("RUN_ONCE: (passive poll) calling gather...");
                 self.gather(worklist).await?;
+                ::log::debug!("RUN_ONCE: (passive poll) gather returned.");
                 // But we SKIP calling callbacks (which includes the Poll plugin itself)
             } else {
                 // Other components just sleep when passive.
@@ -285,7 +287,9 @@ pub trait Flow: Send + Sync {
             }
         } else {
             // Active mode: normal behavior.
+            ::log::debug!("RUN_ONCE: (active) calling gather...");
             self.gather(worklist).await?;
+            ::log::debug!("RUN_ONCE: (active) gather returned. worklist.incoming.len()={}", worklist.incoming.len());
             for cb_mutex in self.callbacks() {
                 let mut cb = cb_mutex.lock().await;
                 cb.gather(worklist).await?;
@@ -293,11 +297,7 @@ pub trait Flow: Send + Sync {
         }
 
         let gathered_count = worklist.incoming.len();
-        if gathered_count == 0 {
-            return Ok(0);
-        }
-
-        {
+        if gathered_count > 0 {
             let metrics_arc = self.metrics();
             let mut metrics = metrics_arc.lock().await;
             metrics.flow.msg_count_in += gathered_count as u64;
@@ -320,7 +320,10 @@ pub trait Flow: Send + Sync {
 
         self.post(worklist).await?;
         self.ack(worklist).await?;
-        Ok(gathered_count)
+        
+        // Count how many we actually processed in some way
+        let processed = gathered_count + worklist.ok.len() + worklist.failed.len() + worklist.rejected.len();
+        Ok(processed)
     }
 
     async fn run(&self) -> anyhow::Result<()> {

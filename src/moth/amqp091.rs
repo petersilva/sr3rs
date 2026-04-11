@@ -19,6 +19,7 @@ pub struct Amqp091 {
     channel: Channel,
     consumer: Option<Consumer>,
     queue_name: Option<String>,
+    prefetch: u16,
 }
 
 impl Amqp091 {
@@ -41,12 +42,18 @@ impl Amqp091 {
             channel,
             consumer: None,
             queue_name: None,
+            prefetch: 10,
         })
     }
 }
 
 #[async_trait]
 impl Moth for Amqp091 {
+    fn set_consume_options(&mut self, queue_name: &str, prefetch: u16) {
+        self.queue_name = Some(queue_name.to_string());
+        self.prefetch = prefetch;
+    }
+
     async fn subscribe(&mut self, topics: &[String], exchange: &str, queue_name: &str) -> Result<()> {
         log::debug!("MOTH: AMQP 0.9.1 subscribing to topics {:?} on exchange {} with queue {}", topics, exchange, queue_name);
         
@@ -82,6 +89,8 @@ impl Moth for Amqp091 {
         }
 
         let queue_name = self.queue_name.as_ref().ok_or_else(|| anyhow::anyhow!("No queue to consume from. Call subscribe first."))?;
+        
+        self.channel.basic_qos(self.prefetch, BasicQosOptions::default()).await?;
         
         let consumer = self.channel.basic_consume(
             queue_name,

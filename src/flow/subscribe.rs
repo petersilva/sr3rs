@@ -49,11 +49,12 @@ impl SubscribeFlow {
     pub async fn connect_full(&mut self, declare: bool, consume: bool) -> anyhow::Result<()> {
         if declare {
             self.connect_exchanges().await?;
-            self.connect_queues().await?;
-        } else if consume {
+        }
+        
+        if declare || consume {
             let subscriptions_count = self.base.config.subscriptions.len();
             for idx in 0..subscriptions_count {
-                self.connect_subscription_full(idx, false, true).await?;
+                self.connect_subscription_full(idx, declare, consume).await?;
             }
         }
 
@@ -100,6 +101,7 @@ impl SubscribeFlow {
         log::info!("Connecting to broker: {}", broker.redacted());
         
         let mut moth = MothFactory::new(&broker, true).await?;
+        moth.set_consume_options(&sub.queue.name, self.base.config.prefetch as u16);
 
         if declare {
             let topics: Vec<String> = sub.bindings.iter().map(|b| b.topic.clone()).collect();
@@ -273,21 +275,30 @@ impl Flow for SubscribeFlow {
             let mut consumer = consumer_mutex.lock().await;
             
             let mut count = 0;
+            log::debug!("GATHER: starting to gather from consumer idx {}", consumer.subscription_idx);
             while total_gathered < batch_size && count < (batch_size / self.consumers.len()).max(1) {
                 // moth.consume() is async
+                log::debug!("GATHER: waiting for message from moth.consume()...");
                 match tokio::time::timeout(tokio::time::Duration::from_millis(500), consumer.moth.consume()).await {
                     Ok(Ok(Some(mut msg))) => {
+                        log::debug!("GATHER: received message");
                         msg.fields.insert("_consumer_idx".to_string(), consumer.subscription_idx.to_string());
                         worklist.incoming.push(msg);
                         count += 1;
                         total_gathered += 1;
                     }
-                    Ok(Ok(None)) => break,
+                    Ok(Ok(None)) => {
+                        log::debug!("GATHER: received None");
+                        break;
+                    }
                     Ok(Err(e)) => {
                         log::error!("GATHER: error from {}: {}", redact_url(&consumer.broker_url), e);
                         break;
                     }
-                    Err(_) => break, // Timeout
+                    Err(_) => {
+                        log::debug!("GATHER: timeout after 500ms");
+                        break; // Timeout
+                    }
                 }
             }
         }

@@ -12,6 +12,8 @@ pub struct Amqp1;
 
 #[async_trait]
 impl Moth for Amqp1 {
+    fn set_consume_options(&mut self, _queue_name: &str, _prefetch: u16) {}
+
     async fn subscribe(&mut self, _topics: &[String], _exchange: &str, _queue_name: &str) -> Result<()> {
         Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
     }
