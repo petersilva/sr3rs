@@ -114,6 +114,9 @@ enum Commands {
         component: String,
         config_file: String,
         instance: u32,
+    },
+    Sanity {
+
     }
 }
 
@@ -1011,6 +1014,9 @@ async fn main() -> Result<()> {
 
             let _ = std::fs::remove_file(pid_file);
             res?;
+        }
+       Commands::Sanity { } => {
+            log::warn!("Sanity not implemented");
         }
     }
 
