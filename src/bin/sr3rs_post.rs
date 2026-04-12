@@ -28,6 +28,11 @@ struct Cli {
     /// Enable debug logging (alias for --log_level debug)
     #[arg(long)]
     debug: bool,
+
+    /// Maximum number of messages to process before exiting
+    #[arg(long = "messageCountMax", global = true)]
+    message_count_max: Option<usize>,
+
 }
 
 #[tokio::main]
@@ -54,6 +59,10 @@ async fn main() -> Result<()> {
         let mut config_obj = Config::new();
         config_obj.apply_component_defaults(&comp);
         config_obj.load(&config_file)?;
+         if let Some(m) = cli.message_count_max {
+                config_obj.message_count_max = m as u32;
+         }
+
         config_obj.finalize()?;
 
         let mut flow = SubscribeFlow::new(config_obj);
