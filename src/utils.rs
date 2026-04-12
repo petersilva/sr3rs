@@ -69,11 +69,11 @@ pub fn detect_component(config_path: &str) -> String {
     "subscribe".to_string()
 }
 
-pub fn resolve_patterns(patterns: Vec<String>) -> Vec<String> {
+pub fn resolve_patterns(patterns: Vec<String>, default_component: &str) -> Vec<String> {
     let config_dir = paths::get_user_config_dir();
     
     let mut results = Vec::new();
-    
+    log::warn!( "resolve_patterns 1-non-empty  patterns:{:?}", patterns );
     if patterns.is_empty() {
         let p = config_dir.join("**").join("*.conf").to_string_lossy().to_string();
         if let Ok(entries) = glob(&p) {
@@ -88,6 +88,7 @@ pub fn resolve_patterns(patterns: Vec<String>) -> Vec<String> {
         }
         return results;
     }
+    log::warn!( "resolve_patterns 2-non-empty  patterns:{:?} default_component:{:?}", patterns, default_component );
 
     for p in patterns {
         let p_path = std::path::Path::new(&p);
@@ -97,6 +98,7 @@ pub fn resolve_patterns(patterns: Vec<String>) -> Vec<String> {
             }
             continue;
         }
+        log::warn!( "resolve_patterns 3-non-empty  p:{:?}", p );
 
         let search_patterns = if p.contains('*') {
             if p.contains('/') {
@@ -112,8 +114,8 @@ pub fn resolve_patterns(patterns: Vec<String>) -> Vec<String> {
                 ]
             } else {
                 vec![
-                    config_dir.join("**").join(&p).to_string_lossy().to_string(),
-                    config_dir.join("**").join(format!("{}.conf", p)).to_string_lossy().to_string()
+                    config_dir.join(default_component).join(&p).to_string_lossy().to_string(),
+                    config_dir.join(default_component).join(format!("{}.conf", p)).to_string_lossy().to_string()
                 ]
             }
         };

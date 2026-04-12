@@ -7,7 +7,7 @@ use clap::Parser;
 use sr3rs::Config;
 use sr3rs::flow::{Flow, subscribe::SubscribeFlow, Worklist};
 use sr3rs::message::Message;
-use sr3rs::utils::{setup_logging, detect_component, resolve_patterns};
+use sr3rs::utils::{setup_logging, resolve_patterns};
 use std::path::Path;
 use anyhow::Result;
 
@@ -52,10 +52,10 @@ async fn main() -> Result<()> {
     };
 
     setup_logging(log_level, None)?;
-    let configs = resolve_patterns(cli.config);
+    let comp = "post".to_string();
+    let configs = resolve_patterns(cli.config, &comp);
     
     for config_file in configs {
-        let comp = detect_component(&config_file);
         let mut config_obj = Config::new();
         config_obj.apply_component_defaults(&comp);
         config_obj.load(&config_file)?;
@@ -69,15 +69,14 @@ async fn main() -> Result<()> {
         flow.connect().await?;
 
         let mut worklist = Worklist::new();
-        for file_path in &cli.files {
-            match Message::from_file(Path::new(file_path), flow.config()) {
-                Ok(msg) => {
-                    log::info!("Queuing notification for: {}", file_path);
-                    worklist.ok.push(msg);
-                }
-                Err(e) => log::error!("Failed to build message for {}: {}", file_path, e),
-            }
-        }
+
+        log::debug!(" cli_files: {:?} ", cli.files );
+
+        let count = flow.run_once(&mut worklist).await?;
+
+        //for file_path in &cli.files {
+
+        //}
 
         if !worklist.ok.is_empty() {
             flow.post(&mut worklist).await?;

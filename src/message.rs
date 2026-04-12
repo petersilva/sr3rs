@@ -61,11 +61,12 @@ impl Message {
 
         let mut msg = Self::new(base_url, &rel_path.to_string_lossy());
         msg.fields.insert("size".to_string(), metadata.len().to_string());
-        
+
         if let Ok(mtime) = metadata.modified() {
             let dt: chrono::DateTime<chrono::Utc> = mtime.into();
             msg.fields.insert("mtime".to_string(), dt.to_rfc3339());
         }
+        log::debug!( "message::from_file Message {:?}", &msg );
 
         Ok(msg)
     }

@@ -104,7 +104,7 @@ enum Commands {
     Post {
         /// Path or pattern to the configuration file(s)
         #[arg(short, long)]
-        config: Vec<String>,
+        config_patterns: Vec<String>,
 
         /// Files to announce
         files: Vec<String>,
@@ -224,7 +224,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Show { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns, "subscribe");
             for config_file in configs {
                 log::debug!("Resolved config: {}", config_file);
                 let component = detect_component(&config_file);
@@ -245,7 +245,7 @@ async fn main() -> Result<()> {
         }
         Commands::Foreground { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns, "subscribe");
             if configs.len() > 1 {
                 anyhow::bail!("Foreground only supports one configuration at a time. Found: {:?}", configs);
             }
@@ -296,7 +296,7 @@ async fn main() -> Result<()> {
         }
         Commands::Start { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
             let exe = std::env::current_exe()?;
 
             for config_file in configs {
@@ -365,7 +365,7 @@ async fn main() -> Result<()> {
         }
         Commands::Stop { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
 
             for config_file in configs {
                 let comp = detect_component(&config_file);
@@ -407,7 +407,7 @@ async fn main() -> Result<()> {
         }
         Commands::Status { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
 
             if configs.is_empty() {
                 println!("No configurations found in {}", paths::get_user_config_dir().display());
@@ -559,7 +559,7 @@ async fn main() -> Result<()> {
         }
         Commands::Enable { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
 
             for config_file in configs {
                 let comp = detect_component(&config_file);
@@ -588,7 +588,7 @@ async fn main() -> Result<()> {
         }
         Commands::Disable { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
 
             for config_file in configs {
                 let comp = detect_component(&config_file);
@@ -640,7 +640,7 @@ async fn main() -> Result<()> {
         }
         Commands::Cleanup { config_patterns, danger_will_robinson } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
 
             if configs.len() > 1 && danger_will_robinson != configs.len() {
                 log::error!("specify --dangerWillRobinson={} to cleanup multiple configs when > 1 involved. (actual: {}, given: {})", 
@@ -737,7 +737,7 @@ async fn main() -> Result<()> {
         }
         Commands::Edit { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
 
             if configs.is_empty() {
                 println!("No configuration files found to edit.");
@@ -765,7 +765,7 @@ async fn main() -> Result<()> {
         }
         Commands::Declare { config_patterns } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns.clone());
+            let configs = resolve_patterns(config_patterns.clone(),"subscribe");
 
             let mut admins = std::collections::HashMap::new();
             let mut unique_users = std::collections::HashSet::new();
@@ -909,12 +909,17 @@ async fn main() -> Result<()> {
                 let _ = flow.shutdown().await;
             }
         }
-        Commands::Post { config, files } => {
+        Commands::Post { config_patterns, files } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config);
+
+            log::warn!("config: {:?}  files: {:?} ", config_patterns, files);
+
+            let comp = "post".to_string();
+            let configs = resolve_patterns(config_patterns, &comp);
             
+
             for config_file in configs {
-                let comp = detect_component(&config_file);
+                log::warn!("in the config loop, config_file: {:?}", config_file);
                 let mut config_obj = Config::new();
                 config_obj.apply_component_defaults(&comp);
                 config_obj.load(&config_file)?;
@@ -928,26 +933,22 @@ async fn main() -> Result<()> {
                 let mut total_found = 0;
 
                 flow.connect().await?;
-                loop {
-                    let mut worklist = Worklist::new();
-                    let count = flow.run_once(&mut worklist).await?;
-                    total_found += count; // Actually, gather gives us count in incoming, run_once returns total processed
+
+                let mut worklist = Worklist::new();
+                let count = flow.run_once(&mut worklist).await?;
+                total_found += count; // Actually, gather gives us count in incoming, run_once returns total processed
 
                     // Let's assume the gather puts it in worklist.incoming, then run_once moves it to worklist.ok
                     // Actually run_once is returning `processed`
 
-                    if count == 0 {
-                        // Gather returned 0, we are done
-                        break;
-                    }
-                    total_announced += count;
-                }                flow.shutdown().await?;
+                total_announced += count;
+                flow.shutdown().await?;
                 log::info!("Successfully announced {} files (out of {} found) using {}.", total_announced, total_found, config_file);
             }
         }
         Commands::Remove { config_patterns, danger_will_robinson } => {
             setup_logging(log_level, None)?;
-            let configs = resolve_patterns(config_patterns);
+            let configs = resolve_patterns(config_patterns,"subscribe");
 
             if configs.len() > 1 && danger_will_robinson != configs.len() {
                 log::error!("specify --dangerWillRobinson={} to remove multiple configs when > 1 involved. (actual: {}, given: {})", 
