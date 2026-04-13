@@ -323,12 +323,14 @@ impl Config {
             }
             "post" | "cpost" => {
                 self.download = false;
+                self.post_on_start = true;
                 self.sleep = 0.0;
                 self.flow_callbacks.push("nodupe".to_string());
                 self.flow_callbacks.push("file".to_string());
                 self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
-            }            "watch" => {
+            }            
+            "watch" => {
                 self.download = false;
                 self.sleep = 5.0;
                 self.flow_callbacks.push("nodupe".to_string());

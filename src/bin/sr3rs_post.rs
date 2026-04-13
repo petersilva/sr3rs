@@ -64,13 +64,12 @@ async fn main() -> Result<()> {
          }
 
         config_obj.finalize()?;
+        config_obj.post_paths = cli.files.clone();
 
         let mut flow = SubscribeFlow::new(config_obj);
         flow.connect().await?;
 
         let mut worklist = Worklist::new();
-
-        log::debug!(" cli_files: {:?} ", cli.files );
 
         let count = flow.run_once(&mut worklist).await?;
 
