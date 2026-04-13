@@ -64,6 +64,7 @@ pub struct Config {
     pub housekeeping: u32, // seconds
     pub message_count_max: u32,
     pub log_level: String,
+    pub buffer_size: u64,
     
     #[serde(skip)]
     pub credentials: CredentialDb,
@@ -136,6 +137,7 @@ impl Default for Config {
             component: "flow".to_string(),
             configname: None,
             broker: None,
+            buffer_size: 4192,
             exchange: "xpublic".to_string(),
             queue_name: "q_${BROKER_USER}.${COMPONENT}.${CONFIG}.${QUEUESHARE}".to_string(),
             prefetch: 10,

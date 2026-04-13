@@ -3,8 +3,8 @@
 // Copyright (C) Peter Silva, 2026
 //
 
-use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +14,10 @@ pub struct Message {
     pub pub_time: chrono::DateTime<chrono::Utc>,
     #[serde(flatten)]
     pub fields: HashMap<String, String>,
+
+    #[serde(flatten)]
+    pub delete_on_post: HashMap<String, String>,
+
     #[serde(skip)]
     pub ack_id: Option<String>,
 }
@@ -30,6 +34,7 @@ impl Message {
             rel_path: r,
             pub_time: chrono::Utc::now(),
             fields: HashMap::new(),
+            delete_on_post: HashMap::new(),
             ack_id: None,
         }
     }
@@ -62,9 +67,18 @@ impl Message {
         let mut msg = Self::new(base_url, &rel_path.to_string_lossy());
         msg.fields.insert("size".to_string(), metadata.len().to_string());
 
+        // identity if it is a file, fileOp if not.
+
+
+        // missing username, groupname, mode
+
         if let Ok(mtime) = metadata.modified() {
             let dt: chrono::DateTime<chrono::Utc> = mtime.into();
             msg.fields.insert("mtime".to_string(), dt.to_rfc3339());
+        }
+        if let Ok(mtime) = metadata.accessed() {
+            let dt: chrono::DateTime<chrono::Utc> = mtime.into();
+            msg.fields.insert("atime".to_string(), dt.to_rfc3339());
         }
         log::debug!( "message::from_file Message {:?}", &msg );
 
