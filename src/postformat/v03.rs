@@ -55,6 +55,33 @@ impl PostFormat for V03 {
                             }
                         }
                     }
+                    "identity" => {
+                        if let Some(obj) = v.as_object() {
+                            for (id_k, id_v) in obj {
+                                if let Some(s) = id_v.as_str() {
+                                    msg.identity.insert(id_k.clone(), s.to_string());
+                                } else {
+                                    msg.identity.insert(id_k.clone(), id_v.to_string());
+                                }
+                            }
+                        } else if let Some(s) = v.as_str() {
+                            msg.fields.insert(k.clone(), s.to_string());
+                        }
+                    }
+                    "fileOperation" | "file_operation" => {
+                        if let Some(obj) = v.as_object() {
+                            for (fo_k, fo_v) in obj {
+                                if let Some(s) = fo_v.as_str() {
+                                    msg.file_operation.insert(fo_k.clone(), s.to_string());
+                                } else {
+                                    msg.file_operation.insert(fo_k.clone(), fo_v.to_string());
+                                }
+                            }
+                        }
+                    }
+                    "_deleteOnPost" | "delete_on_post" => {
+                        // Ignore internal state fields
+                    }
                     _ => {
                         if v.is_string() {
                             msg.fields.insert(k.clone(), v.as_str().unwrap().to_string());
@@ -129,7 +156,29 @@ impl PostFormat for V03 {
         body_map.insert("relPath".to_string(), serde_json::Value::String(msg.rel_path.clone()));
         body_map.insert("pubTime".to_string(), serde_json::Value::String(msg.pub_time.to_rfc3339()));
 
+        if !msg.identity.is_empty() {
+            let mut identity_map = serde_json::Map::new();
+            for (k, v) in &msg.identity {
+                identity_map.insert(k.clone(), serde_json::Value::String(v.clone()));
+            }
+            body_map.insert("identity".to_string(), serde_json::Value::Object(identity_map));
+        }
+
+        if !msg.file_operation.is_empty() {
+            let mut fo_map = serde_json::Map::new();
+            for (k, v) in &msg.file_operation {
+                fo_map.insert(k.clone(), serde_json::Value::String(v.clone()));
+            }
+            body_map.insert("fileOperation".to_string(), serde_json::Value::Object(fo_map));
+        }
+
         for (k, v) in &msg.fields {
+            if (k == "identity" && !msg.identity.is_empty()) ||
+               (k == "fileOperation" && !msg.file_operation.is_empty()) ||
+               (k == "file_operation" && !msg.file_operation.is_empty()) ||
+               (k == "_deleteOnPost" || k == "delete_on_post") {
+                continue;
+            }
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(v) {
                 body_map.insert(k.clone(), json_val);
             } else {
