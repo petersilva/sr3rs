@@ -122,6 +122,7 @@ impl GatherFilePlugin {
                                 let _ = tx_clone.blocking_send(Ok(path));
                             }
                         }
+                        // FIXME: we care about removals also.
                         _ => {}
                     }
                 }

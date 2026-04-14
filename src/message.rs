@@ -5,6 +5,7 @@
 
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
+use std::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +15,10 @@ pub struct Message {
     pub pub_time: chrono::DateTime<chrono::Utc>,
     #[serde(flatten)]
     pub fields: HashMap<String, String>,
+
+    pub identity: HashMap<String, String>,
+
+    pub file_operation: HashMap<String, String>,
 
     #[serde(flatten)]
     pub delete_on_post: HashMap<String, String>,
@@ -34,6 +39,8 @@ impl Message {
             rel_path: r,
             pub_time: chrono::Utc::now(),
             fields: HashMap::new(),
+            identity: HashMap::new(),
+            file_operation: HashMap::new(),
             delete_on_post: HashMap::new(),
             ack_id: None,
         }
@@ -69,15 +76,18 @@ impl Message {
 
         // identity if it is a file, fileOp if not.
         if metadata.is_file() {
-            log::warn!(" buffer_size: {:?} identity_method {:?} ", config.buffer_size, config.identity_method );
             let mut id =  crate::identity::factory( &config.identity_method ).unwrap();
             id.update_file( &abs_path.to_str().unwrap() );
-            log::warn!(" id: {:?}", id.value() );                
-        }
+            msg.identity.insert( "method".to_string(), id.get_method() );
+            msg.identity.insert( "value".to_string(), id.value() );
+        } else if metadata.is_dir() {
+            msg.file_operation.insert("directory".to_string(), "".to_string() );
+        } else if metadata.is_symlink() {
+            let destination = fs::read_link(&abs_path).unwrap() ;
+            msg.file_operation.insert("link".to_string(), destination.display().to_string() );
+        } // FIXME: missing special files.
 
-
-
-        // missing username, groupname, mode
+        // FIXME: missing username, groupname, mode
 
         if let Ok(mtime) = metadata.modified() {
             let dt: chrono::DateTime<chrono::Utc> = mtime.into();
