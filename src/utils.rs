@@ -73,7 +73,6 @@ pub fn resolve_patterns(patterns: Vec<String>, default_component: &str) -> Vec<S
     let config_dir = paths::get_user_config_dir();
     
     let mut results = Vec::new();
-    log::warn!( "resolve_patterns 1-non-empty  patterns:{:?}", patterns );
     if patterns.is_empty() {
         let p = config_dir.join("**").join("*.conf").to_string_lossy().to_string();
         if let Ok(entries) = glob(&p) {
@@ -88,7 +87,6 @@ pub fn resolve_patterns(patterns: Vec<String>, default_component: &str) -> Vec<S
         }
         return results;
     }
-    log::warn!( "resolve_patterns 2-non-empty  patterns:{:?} default_component:{:?}", patterns, default_component );
 
     for p in patterns {
         let p_path = std::path::Path::new(&p);
@@ -98,7 +96,6 @@ pub fn resolve_patterns(patterns: Vec<String>, default_component: &str) -> Vec<S
             }
             continue;
         }
-        log::warn!( "resolve_patterns 3-non-empty  p:{:?}", p );
 
         let search_patterns = if p.contains('*') {
             if p.contains('/') {
@@ -121,7 +118,6 @@ pub fn resolve_patterns(patterns: Vec<String>, default_component: &str) -> Vec<S
         };
 
         for sp in search_patterns {
-            log::debug!("Searching for configs with pattern: {}", sp);
             if let Ok(entries) = glob(&sp) {
                 for entry in entries.flatten() {
                     if entry.is_file() {
