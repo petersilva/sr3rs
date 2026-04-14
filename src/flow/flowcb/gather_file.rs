@@ -89,12 +89,14 @@ impl GatherFilePlugin {
         }
 
         // Calculate identity
+        /* this is already done in Message::from_file ...
         if let Some(mut id_obj) = crate::identity::factory(&self.config.identity_method) {
             if let Ok(_) = id_obj.update_file(path.to_str().unwrap_or("")) {
                 msg.identity.insert("method".to_string(), self.config.identity_method.clone() );
                 msg.identity.insert("value".to_string(), id_obj.value() );
             }
         }
+         */ 
 
         Ok(msg)
     }

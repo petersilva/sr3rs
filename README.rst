@@ -25,10 +25,10 @@ This is a proof of concept for now.
    * is completely async, heavily based on tokio. 
    * was researched to be idiomatic rust, and use rust conventions.
      * internal vars do not use camel_case for example.
+   * does directory tree walks properly 1 batch at a time... python walks the whole tree in one shot.
    * there is a beauutiful plugin architecture for rust plugins, but they need to be compiled in, so it´s kind of *built-in plugins*.
    * one of the built-in rust plugins is a plugin to run existing sr3 python flowcb plugins if it cannot find a rust one.
    * has little (no?) documentation yet.
-
 
 Development Method
 ------------------
