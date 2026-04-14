@@ -12,10 +12,9 @@ pub struct Mqtt;
 
 #[async_trait]
 impl Moth for Mqtt {
-    fn set_consume_options(&mut self, _queue_name: &str, _prefetch: u16) {}
-    
-    async fn subscribe(&mut self, _topics: &[String], _exchange: &str, _queue_name: &str) -> Result<()> {
-        Err(anyhow::anyhow!("MQTT not implemented"))
+    fn set_consume_options(&mut self, _queue_name: &str, _prefetch: u16, _expire: Option<f64>) {}
+
+    async fn subscribe(&mut self, _topics: &[String], _exchange: &str, _queue_name: &str) -> Result<()> {        Err(anyhow::anyhow!("MQTT not implemented"))
     }
     async fn start_consume(&mut self) -> Result<()> {
         Err(anyhow::anyhow!("MQTT not implemented"))

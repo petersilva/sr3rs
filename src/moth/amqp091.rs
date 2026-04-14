@@ -20,6 +20,7 @@ pub struct Amqp091 {
     consumer: Option<Consumer>,
     queue_name: Option<String>,
     prefetch: u16,
+    expire: Option<f64>,
 }
 
 impl Amqp091 {
@@ -43,15 +44,17 @@ impl Amqp091 {
             consumer: None,
             queue_name: None,
             prefetch: 10,
+            expire: None,
         })
     }
 }
 
 #[async_trait]
 impl Moth for Amqp091 {
-    fn set_consume_options(&mut self, queue_name: &str, prefetch: u16) {
+    fn set_consume_options(&mut self, queue_name: &str, prefetch: u16, expire: Option<f64>) {
         self.queue_name = Some(queue_name.to_string());
         self.prefetch = prefetch;
+        self.expire = expire;
     }
 
     async fn subscribe(&mut self, topics: &[String], exchange: &str, queue_name: &str) -> Result<()> {
@@ -60,13 +63,21 @@ impl Moth for Amqp091 {
         // DO NOT automatically declare exchange here.
         // Subscribers often have bind permissions but not declare permissions for public exchanges.
 
+        let mut args = FieldTable::default();
+        if let Some(expire) = self.expire {
+            let expire_ms = (expire * 1000.0) as u32;
+            if expire_ms > 0 {
+                args.insert("x-expires".into(), lapin::types::AMQPValue::LongUInt(expire_ms));
+            }
+        }
+
         self.channel.queue_declare(
             queue_name,
             QueueDeclareOptions {
                 durable: true,
                 ..Default::default()
             },
-            FieldTable::default(),
+            args,
         ).await?;
 
         for topic in topics {

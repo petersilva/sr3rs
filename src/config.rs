@@ -53,6 +53,7 @@ pub struct Config {
     pub exchange: String,
     pub queue_name: String,
     pub prefetch: u32,
+    pub expire: Option<f64>,
     pub subtopics: Vec<String>,
     pub topic_prefix: Vec<String>,
     pub masks: Vec<Filter>,
@@ -141,6 +142,7 @@ impl Default for Config {
             exchange: "xpublic".to_string(),
             queue_name: "q_${BROKER_USER}.${COMPONENT}.${CONFIG}.${QUEUESHARE}".to_string(),
             prefetch: 10,
+            expire: None,
             subtopics: Vec::new(),
             topic_prefix: vec!["v02".to_string(), "post".to_string()],
             masks: Vec::new(),
@@ -566,6 +568,12 @@ impl Config {
                     }
                     Ok(())
                 }
+                "expire" => {
+                    if let Some(ref val) = v {
+                        self.expire = Some(parse_duration(val) as f64);
+                    }
+                    Ok(())
+                }
                 "messageCountMax" => {
                     if let Some(ref val) = v {
                         self.message_count_max = parse_count(val);
@@ -869,6 +877,7 @@ impl Config {
                                 topic: topic.clone(),
                             });
                         }
+                        sub.queue.expire = self.expire;
                         found = true;
                         break;
                     }
@@ -878,13 +887,15 @@ impl Config {
 
             if !found {
                 let cred = Credential::new(broker.url.clone());
-                self.subscriptions.push(Subscription::new(
+                let mut new_sub = Subscription::new(
                     Some(cred),
                     resolved_queue_name,
                     self.queue_name.clone(),
                     Some(exchange),
                     topic,
-                ));
+                );
+                new_sub.queue.expire = self.expire;
+                self.subscriptions.push(new_sub);
             }
         }
     }

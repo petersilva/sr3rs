@@ -86,7 +86,7 @@ impl SenderFlow {
         log::info!("Connecting to broker: {}", broker.redacted());
         
         let mut moth = MothFactory::new(&broker, true).await?;
-        moth.set_consume_options(&sub.queue.name, self.base.config.prefetch as u16);
+        moth.set_consume_options(&sub.queue.name, self.base.config.prefetch as u16, sub.queue.expire);
 
         if declare {
             let topics: Vec<String> = sub.bindings.iter().map(|b| b.topic.clone()).collect();
