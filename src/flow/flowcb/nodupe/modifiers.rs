@@ -28,13 +28,9 @@ impl FlowCB for NameOnlyPlugin {
             let parts: Vec<&str> = m.rel_path.split('/').collect();
             let file_name = parts.last().copied().unwrap_or(m.rel_path.as_str());
 
-            m.fields.insert("_nodupe_override_path".to_string(), file_name.to_string());
-            m.fields.insert("_nodupe_override_key".to_string(), file_name.to_string());
+            m.delete_on_post.insert("_nodupe_override_path".to_string(), file_name.to_string());
+            m.delete_on_post.insert("_nodupe_override_key".to_string(), file_name.to_string());
             
-            let mut dop = m.fields.get("_deleteOnPost").cloned().unwrap_or_default();
-            if !dop.is_empty() { dop.push(','); }
-            dop.push_str("_nodupe_override_path,_nodupe_override_key");
-            m.fields.insert("_deleteOnPost".to_string(), dop);
         }
         Ok(())
     }
@@ -58,12 +54,7 @@ impl FlowCB for PathOnlyPlugin {
 
     async fn after_accept(&self, wl: &mut Worklist) -> anyhow::Result<()> {
         for m in &mut wl.incoming {
-            m.fields.insert("_nodupe_override_key".to_string(), m.rel_path.clone());
-            
-            let mut dop = m.fields.get("_deleteOnPost").cloned().unwrap_or_default();
-            if !dop.is_empty() { dop.push(','); }
-            dop.push_str("_nodupe_override_key");
-            m.fields.insert("_deleteOnPost".to_string(), dop);
+            m.delete_on_post.insert("_nodupe_override_key".to_string(), m.rel_path.clone());
         }
         Ok(())
     }
@@ -87,12 +78,7 @@ impl FlowCB for DataOnlyPlugin {
 
     async fn after_accept(&self, wl: &mut Worklist) -> anyhow::Result<()> {
         for m in &mut wl.incoming {
-            m.fields.insert("_nodupe_override_path".to_string(), "data".to_string());
-            
-            let mut dop = m.fields.get("_deleteOnPost").cloned().unwrap_or_default();
-            if !dop.is_empty() { dop.push(','); }
-            dop.push_str("_nodupe_override_path");
-            m.fields.insert("_deleteOnPost".to_string(), dop);
+            m.delete_on_post.insert("_nodupe_override_path".to_string(), "data".to_string());
         }
         Ok(())
     }
@@ -118,7 +104,7 @@ mod tests {
         let mut wl = Worklist::new();
         
         let mut m1 = make_message();
-        m1.fields.insert("_nodupe_override_path".to_string(), "existing".to_string());
+        m1.delete_on_post.insert("_nodupe_override_path".to_string(), "existing".to_string());
         
         let m2 = make_message();
         
@@ -128,13 +114,12 @@ mod tests {
         plugin.after_accept(&mut wl).await.unwrap();
 
         assert_eq!(wl.incoming.len(), 2);
-        assert_eq!(wl.incoming[0].fields.get("_nodupe_override_key").unwrap(), "File.txt");
-        assert_eq!(wl.incoming[0].fields.get("_nodupe_override_path").unwrap(), "File.txt");
+        assert_eq!(wl.incoming[0].delete_on_post.get("_nodupe_override_key").unwrap(), "File.txt");
+        assert_eq!(wl.incoming[0].delete_on_post.get("_nodupe_override_path").unwrap(), "File.txt");
         
-        assert_eq!(wl.incoming[1].fields.get("_nodupe_override_key").unwrap(), "File.txt");
-        assert_eq!(wl.incoming[1].fields.get("_nodupe_override_path").unwrap(), "File.txt");
+        assert_eq!(wl.incoming[1].delete_on_post.get("_nodupe_override_key").unwrap(), "File.txt");
+        assert_eq!(wl.incoming[1].delete_on_post.get("_nodupe_override_path").unwrap(), "File.txt");
         
-        assert!(wl.incoming[1].fields.get("_deleteOnPost").unwrap().contains("_nodupe_override_key"));
     }
 
     #[tokio::test]
@@ -143,7 +128,7 @@ mod tests {
         let mut wl = Worklist::new();
         
         let mut m1 = make_message();
-        m1.fields.insert("_nodupe_override_key".to_string(), "existing".to_string());
+        m1.delete_on_post.insert("_nodupe_override_key".to_string(), "existing".to_string());
         
         let m2 = make_message();
         
@@ -153,9 +138,8 @@ mod tests {
         plugin.after_accept(&mut wl).await.unwrap();
 
         assert_eq!(wl.incoming.len(), 2);
-        assert_eq!(wl.incoming[0].fields.get("_nodupe_override_key").unwrap(), "ThisIsAPath/To/A/File.txt");
-        assert_eq!(wl.incoming[1].fields.get("_nodupe_override_key").unwrap(), "ThisIsAPath/To/A/File.txt");
-        assert!(wl.incoming[1].fields.get("_deleteOnPost").unwrap().contains("_nodupe_override_key"));
+        assert_eq!(wl.incoming[0].delete_on_post.get("_nodupe_override_key").unwrap(), "ThisIsAPath/To/A/File.txt");
+        assert_eq!(wl.incoming[1].delete_on_post.get("_nodupe_override_key").unwrap(), "ThisIsAPath/To/A/File.txt");
     }
 
     #[tokio::test]
@@ -164,7 +148,7 @@ mod tests {
         let mut wl = Worklist::new();
         
         let mut m1 = make_message();
-        m1.fields.insert("_nodupe_override_path".to_string(), "existing".to_string());
+        m1.delete_on_post.insert("_nodupe_override_path".to_string(), "existing".to_string());
         
         let m2 = make_message();
         
@@ -174,8 +158,7 @@ mod tests {
         plugin.after_accept(&mut wl).await.unwrap();
 
         assert_eq!(wl.incoming.len(), 2);
-        assert_eq!(wl.incoming[0].fields.get("_nodupe_override_path").unwrap(), "data");
-        assert_eq!(wl.incoming[1].fields.get("_nodupe_override_path").unwrap(), "data");
-        assert!(wl.incoming[1].fields.get("_deleteOnPost").unwrap().contains("_nodupe_override_path"));
+        assert_eq!(wl.incoming[0].delete_on_post.get("_nodupe_override_path").unwrap(), "data");
+        assert_eq!(wl.incoming[1].delete_on_post.get("_nodupe_override_path").unwrap(), "data");
     }
 }

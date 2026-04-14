@@ -103,19 +103,8 @@ impl RetryPlugin {
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(0);
         
-        msg.fields.insert("_isRetry".to_string(), (current + 1).to_string());
+        msg.delete_on_post.insert("_isRetry".to_string(), (current + 1).to_string());
         
-        let mut delete_on_post = msg.fields.get("_deleteOnPost")
-            .map(|v| v.clone())
-            .unwrap_or_default();
-        
-        if !delete_on_post.contains("_isRetry") {
-            if !delete_on_post.is_empty() {
-                delete_on_post.push(',');
-            }
-            delete_on_post.push_str("_isRetry");
-            msg.fields.insert("_deleteOnPost".to_string(), delete_on_post);
-        }
     }
 }
 

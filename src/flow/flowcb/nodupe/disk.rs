@@ -256,39 +256,29 @@ impl FlowCB for DiskNoDupePlugin {
             if let Some(mtime_str) = m.fields.get("mtime") {
                 if let Ok(mtime) = mtime_str.parse::<f64>() {
                     if mtime < min_mtime {
-                        m.fields.insert("_deleteOnPost".to_string(), "reject".to_string());
-                        m.fields.insert("reject".to_string(), format!("{} too old (nodupe check)", mtime));
+                        m.delete_on_post.insert("reject".to_string(), format!("{} too old (nodupe check)", mtime));
                         wl.rejected.push(m);
                         continue;
                     } else if mtime > max_mtime {
-                        m.fields.insert("_deleteOnPost".to_string(), "reject".to_string());
-                        m.fields.insert("reject".to_string(), format!("{} too new (nodupe check)", mtime));
+                        m.delete_on_post.insert("reject".to_string(), format!("{} too new (nodupe check)", mtime));
                         wl.rejected.push(m);
                         continue;
                     }
                 }
             }
 
-            let is_retry = m.fields.contains_key("_isRetry");
+            let is_retry = m.delete_on_post.contains_key("_isRetry");
             let key = super::derive_key(&m);
-            let path = if let Some(p) = m.fields.get("_nodupe_override_path") {
+            let path = if let Some(p) = m.delete_on_post.get("_nodupe_override_path") {
                 p.clone()
             } else {
                 m.rel_path.trim_start_matches('/').to_string()
             };
 
-            m.fields.insert("_noDupe_key".to_string(), key.clone());
-            m.fields.insert("_noDupe_path".to_string(), path.clone());
-            let mut dop = m.fields.get("_deleteOnPost").cloned().unwrap_or_default();
-            if !dop.is_empty() { dop.push(','); }
-            dop.push_str("_noDupe_key,_noDupe_path");
-            m.fields.insert("_deleteOnPost".to_string(), dop);
-
             if is_retry || Self::not_in_cache(&mut state, &key, &path, now) {
                 new_incoming.push(m);
             } else {
-                m.fields.insert("_deleteOnPost".to_string(), "reject".to_string());
-                m.fields.insert("reject".to_string(), "not modified 1 (nodupe check)".to_string());
+                m.delete_on_post.insert("reject".to_string(), "not modified 1 (nodupe check)".to_string());
                 wl.rejected.push(m);
             }
         }
@@ -426,8 +416,8 @@ mod tests {
         assert_eq!(wl.incoming.len(), 1);
         assert_eq!(wl.rejected.len(), 2);
         
-        assert!(wl.rejected[0].fields.get("reject").unwrap().contains("too old"));
-        assert!(wl.rejected[1].fields.get("reject").unwrap().contains("too new"));
+        assert!(wl.rejected[0].delete_on_post.get("reject").unwrap().contains("too old"));
+        assert!(wl.rejected[1].delete_on_post.get("reject").unwrap().contains("too new"));
     }
 
     #[tokio::test]
