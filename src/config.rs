@@ -54,6 +54,8 @@ pub struct Config {
     pub queue_name: String,
     pub prefetch: u32,
     pub expire: Option<f64>,
+    pub cluster: Option<String>,
+    pub hostname: Option<String>,
     pub subtopics: Vec<String>,
     pub topic_prefix: Vec<String>,
     pub masks: Vec<Filter>,
@@ -143,6 +145,8 @@ impl Default for Config {
             queue_name: "q_${BROKER_USER}.${COMPONENT}.${CONFIG}.${QUEUESHARE}".to_string(),
             prefetch: 10,
             expire: None,
+            cluster: None,
+            hostname: None,
             subtopics: Vec::new(),
             topic_prefix: vec!["v02".to_string(), "post".to_string()],
             masks: Vec::new(),
@@ -571,6 +575,18 @@ impl Config {
                 "expire" => {
                     if let Some(ref val) = v {
                         self.expire = Some(parse_duration(val) as f64);
+                    }
+                    Ok(())
+                }
+                "cluster" | "cl" | "from_cluster" | "fc" => {
+                    if let Some(ref val) = v {
+                        self.cluster = Some(val.to_string());
+                    }
+                    Ok(())
+                }
+                "hostname" => {
+                    if let Some(ref val) = v {
+                        self.hostname = Some(val.to_string());
                     }
                     Ok(())
                 }
