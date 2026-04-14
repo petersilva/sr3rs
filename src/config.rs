@@ -778,11 +778,26 @@ impl Config {
                     }
                     Ok(())
                 }
-                _ => {
+                "flowCallback" | "callback" => {
                     if let Some(ref val) = v {
-                        self.options.insert(k.to_string(), val.to_string());
+                        self.flow_callbacks.push(val.to_string());
                     }
                     Ok(())
+                }
+                "set" | "logEvents" | "logMessageDump" | "logReject" | "events" | "fileEvents" | "retryEmptyBeforeExit" | "accelFtpgetCommand" | "accelFtpputCommand" | "mdelay" | "retry_refilter" | "inline" | "inline_max" | "plugin" | "flow_plugin" | "debug" | "sum" | "inflight" => {
+                    if let Some(ref val) = v {
+                        self.options.insert(k.to_string(), val.to_string());
+                    } else if k == "debug" {
+                        self.log_level = "debug".to_string();
+                    }
+                    Ok(())
+                }
+                _ => {
+                    Err(ConfigError::ParseContext {
+                        file: filename.to_string(),
+                        line: line_no,
+                        message: format!("Unknown option: {}", k),
+                    })
                 }
             };
 
