@@ -68,7 +68,7 @@ impl PostFormat for V03 {
                             msg.fields.insert(k.clone(), s.to_string());
                         }
                     }
-                    "fileOperation" | "file_operation" => {
+                    "fileOp" => {
                         if let Some(obj) = v.as_object() {
                             for (fo_k, fo_v) in obj {
                                 if let Some(s) = fo_v.as_str() {
@@ -169,11 +169,12 @@ impl PostFormat for V03 {
             for (k, v) in &msg.file_operation {
                 fo_map.insert(k.clone(), serde_json::Value::String(v.clone()));
             }
-            body_map.insert("fileOperation".to_string(), serde_json::Value::Object(fo_map));
+            body_map.insert("fileOp".to_string(), serde_json::Value::Object(fo_map));
         }
 
         for (k, v) in &msg.fields {
             if (k == "identity" && !msg.identity.is_empty()) ||
+               (k == "fileOp" && !msg.file_operation.is_empty()) ||
                (k == "fileOperation" && !msg.file_operation.is_empty()) ||
                (k == "file_operation" && !msg.file_operation.is_empty()) ||
                (k == "_deleteOnPost" || k == "delete_on_post") {
