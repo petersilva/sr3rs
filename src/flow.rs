@@ -89,8 +89,8 @@ pub trait Flow: Send + Sync {
             if let Some(mask) = matched_filter {
                 let mut msg = m;
                 if mask.accepting {
-                    msg.fields.insert("_dest_dir".to_string(), mask.directory.to_string_lossy().to_string());
-                    msg.fields.insert("_mirror".to_string(), mask.mirror.to_string());
+                    msg.delete_on_post.insert("_dest_dir".to_string(), mask.directory.to_string_lossy().to_string());
+                    msg.delete_on_post.insert("_mirror".to_string(), mask.mirror.to_string());
                     filtered_incoming.push(msg);
                 } else {
                     worklist.rejected.push(msg);
@@ -98,8 +98,8 @@ pub trait Flow: Send + Sync {
                 }
             } else if config.accept_unmatched {
                 let mut msg = m;
-                msg.fields.insert("_dest_dir".to_string(), config.directory.to_string_lossy().to_string());
-                msg.fields.insert("_mirror".to_string(), config.mirror.to_string());
+                msg.delete_on_post.insert("_dest_dir".to_string(), config.directory.to_string_lossy().to_string());
+                msg.delete_on_post.insert("_mirror".to_string(), config.mirror.to_string());
                 filtered_incoming.push(msg);
             } else {
                 worklist.rejected.push(m);
@@ -164,11 +164,11 @@ pub trait Flow: Send + Sync {
             };
 
             if let Some(transfer) = get_transfer(&scheme, config) {
-                let dest_dir = m.fields.get("_dest_dir")
+                let dest_dir = m.delete_on_post.get("_dest_dir")
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| config.directory.clone());
                 
-                let mirror = m.fields.get("_mirror")
+                let mirror = m.delete_on_post.get("_mirror")
                     .map(|s| s == "true")
                     .unwrap_or(config.mirror);
 
