@@ -56,6 +56,7 @@ pub struct Config {
     pub expire: Option<f64>,
     pub cluster: Option<String>,
     pub hostname: Option<String>,
+    pub source: Option<String>,
     pub subtopics: Vec<String>,
     pub topic_prefix: Vec<String>,
     pub masks: Vec<Filter>,
@@ -147,6 +148,7 @@ impl Default for Config {
             expire: None,
             cluster: None,
             hostname: None,
+            source: None,
             subtopics: Vec::new(),
             topic_prefix: vec!["v02".to_string(), "post".to_string()],
             masks: Vec::new(),
@@ -587,6 +589,12 @@ impl Config {
                 "hostname" => {
                     if let Some(ref val) = v {
                         self.hostname = Some(val.to_string());
+                    }
+                    Ok(())
+                }
+                "source" => {
+                    if let Some(ref val) = v {
+                        self.source = Some(val.to_string());
                     }
                     Ok(())
                 }
