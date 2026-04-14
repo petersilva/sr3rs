@@ -68,6 +68,13 @@ impl Message {
         msg.fields.insert("size".to_string(), metadata.len().to_string());
 
         // identity if it is a file, fileOp if not.
+        if metadata.is_file() {
+            log::warn!(" buffer_size: {:?} identity_method {:?} ", config.buffer_size, config.identity_method );
+            let mut id =  crate::identity::factory( &config.identity_method ).unwrap();
+            id.update_file( &abs_path.to_str().unwrap() );
+            log::warn!(" id: {:?}", id.value() );                
+        }
+
 
 
         // missing username, groupname, mode

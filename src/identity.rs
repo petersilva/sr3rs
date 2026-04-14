@@ -28,6 +28,7 @@ pub trait Identity: Send + Sync {
     }
 }
 
+
 pub fn factory(method: &str) -> Option<Box<dyn Identity>> {
     match method.to_lowercase().as_str() {
         "md5" => Some(Box::new(md5::Md5::new())),
