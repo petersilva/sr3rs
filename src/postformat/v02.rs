@@ -79,9 +79,6 @@ impl PostFormat for V02 {
             msg.fields.insert("identity".to_string(), integrity);
         }
 
-        let delete_on_post = vec!["subtopic"];
-        msg.fields.insert("_deleteOnPost".to_string(), serde_json::to_string(&delete_on_post).unwrap());
-
         for t in ["atime", "mtime"] {
             if let Some(time_val) = msg.fields.get(t).cloned() {
                 if let Some(dt) = Message::parse_v02_time(&time_val) {
@@ -183,7 +180,7 @@ impl PostFormat for V02 {
         
         let mut headers = HashMap::new();
         for (k, v) in &msg.fields {
-            if !["pubTime", "baseUrl", "fileOp", "relPath", "size", "blocks", "content", "identity", "publisher_index"].contains(&k.as_str()) {
+            if !["pubTime", "baseUrl", "fileOp", "relPath", "size", "blocks", "content", "identity"].contains(&k.as_str()) {
                 headers.insert(k.clone(), v.clone());
             }
         }

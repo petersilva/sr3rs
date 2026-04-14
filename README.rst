@@ -1,6 +1,4 @@
-============================
- Sarracenia v3 (MetPX-Sr3rs)
-============================
+# Sarracenia v3 (MetPX-Sr3rs)
 
 Sr3 in Rust.
 
@@ -60,6 +58,9 @@ to flow tests.  The intent is to get to flow tests, and at least run them correc
 The log files will be different though, so extensive massage of the flow tests will be needed
 for them to correctly report.
 
+Once in a while, I do audits, and correct code with a number of manual changes. For example, the original
+python unit tests for messages used incorrect ones, and confused the AI's with contradictory messages,
+so re-worked v02 and v03 postformat manually.
 
 
 All of the following documentation refers to the python version (to be gradually replaced:):

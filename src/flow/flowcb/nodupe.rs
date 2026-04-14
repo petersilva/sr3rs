@@ -15,31 +15,21 @@ pub fn derive_key(msg: &Message) -> String {
     }
 
     // 2nd: derive from fileOp if fileOp is link or is a non-remove directory op
-    if let Some(file_op) = msg.fields.get("fileOp") {
-        if file_op.starts_with("link") {
-            return file_op.clone(); // In Python it's fileOp['link'], assuming fileOp value contains link info
-        } else if file_op.starts_with("directory") {
-            if !file_op.contains("remove") {
-                return msg.rel_path.clone();
-            }
-        }
-    }
 
     // 3rd: use identity (checksum) if available (cod = calculate on download, i.e. no checksum yet)
-    if let Some(identity) = msg.fields.get("identity") {
-        // Simple heuristic: if it has a comma or colon like "sha512,abc...", or JSON
-        // Based on Sarracenia, identity is a dict `{'method': '...', 'value': '...'}`
-        // In Rust Message, we store it as a JSON string or formatted string.
-        // Assuming we store it as "method:value" or JSON. 
-        // For now, if we have identity and it doesn't contain "cod", use it.
-        if !identity.contains("cod") {
-            let mut key = identity.replace('\n', "");
-            // Standardize format to "method,value" if it's "method:value"
-            if let Some(idx) = key.find(':') {
-                key.replace_range(idx..idx+1, ",");
-            }
-            return key;
-        }
+    if msg.identity.is_empty() {
+       if msg.file_operation.is_empty() {
+           // pass
+       } else if msg.file_operation.get("link").is_some() {
+           return format!("link,{}", msg.file_operation.get("link").unwrap().to_string() );
+       } else if msg.file_operation.get("directory").is_some() {
+           return msg.rel_path.clone();
+       }
+    } else { // regular file should have identity and checksum.
+
+       if msg.identity.get("method").is_some() && msg.identity.get("method").unwrap() != "cod" {
+           return format!("{},{}", msg.identity.get("method").unwrap().to_string(), msg.identity.get("value").unwrap().to_string());
+       }
     }
 
     // 4th: use relPath and time (and size, if known)
@@ -87,11 +77,13 @@ mod tests {
         assert_eq!(derive_key(&msg), "ThisIsAPath/To/A/File.txt,20180118151048,28234");
 
         // Identity override
-        msg.fields.insert("identity".to_string(), "sha512:C/HbD77eLraAoj".to_string());
-        assert_eq!(derive_key(&msg), "sha512,C/HbD77eLraAoj");
+        msg.identity.insert("method".to_string(), "sha512".to_string());
+        msg.identity.insert("value".to_string(), "C/HbD77eLraAo".to_string());
+        assert_eq!(derive_key(&msg), "sha512,C/HbD77eLraAo");
 
         // cod (calculate on download) should fallback to path,mtime,size
-        msg.fields.insert("identity".to_string(), "cod".to_string());
+        msg.identity.insert("method".to_string(), "cod".to_string());
+        msg.identity.insert("value".to_string(), "md5".to_string());
         assert_eq!(derive_key(&msg), "ThisIsAPath/To/A/File.txt,20180118151048,28234");
 
         // nodupe_override key
@@ -100,12 +92,12 @@ mod tests {
 
         // fileOp link
         let mut msg2 = make_message();
-        msg2.fields.insert("fileOp".to_string(), "link:SomeLinkTarget".to_string());
-        assert_eq!(derive_key(&msg2), "link:SomeLinkTarget");
+        msg2.file_operation.insert("link".to_string(), "SomeLinkTarget".to_string());
+        assert_eq!(derive_key(&msg2), "link,SomeLinkTarget");
 
         // fileOp directory
         let mut msg3 = make_message();
-        msg3.fields.insert("fileOp".to_string(), "directory:create".to_string());
+        msg3.file_operation.insert("directory".to_string(), "".to_string());
         assert_eq!(derive_key(&msg3), "ThisIsAPath/To/A/File.txt");
     }
 }
