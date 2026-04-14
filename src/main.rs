@@ -934,14 +934,17 @@ async fn main() -> Result<()> {
 
                 flow.connect().await?;
 
-                let mut worklist = Worklist::new();
-                let count = flow.run_once(&mut worklist).await?;
-                total_found += count; // Actually, gather gives us count in incoming, run_once returns total processed
-
+                loop {
+                    let mut worklist = Worklist::new();
+                    let batch_count = flow.run_once(&mut worklist).await?;
+                    total_found += batch_count; // Actually, gather gives us count in incoming, run_once returns total processed
+                    if batch_count == 0 {
+                         break;
+                    }
                     // Let's assume the gather puts it in worklist.incoming, then run_once moves it to worklist.ok
                     // Actually run_once is returning `processed`
-
-                total_announced += count;
+                    total_announced += batch_count;
+                }
                 flow.shutdown().await?;
                 log::info!("Successfully announced {} files (out of {} found) using {}.", total_announced, total_found, config_file);
             }

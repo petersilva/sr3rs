@@ -65,22 +65,21 @@ async fn main() -> Result<()> {
 
         config_obj.finalize()?;
         config_obj.post_paths = cli.files.clone();
-
         let mut flow = SubscribeFlow::new(config_obj);
+        let mut total_count = 0;
         flow.connect().await?;
 
-        let mut worklist = Worklist::new();
+        loop {
+            let mut worklist = Worklist::new();
+            let batch_count = flow.run_once(&mut worklist).await?;
+            if batch_count == 0 {
+                break;
+            };
+            total_count += batch_count;
+        };
+        //flow.post(&mut worklist).await?;
 
-        let count = flow.run_once(&mut worklist).await?;
-
-        //for file_path in &cli.files {
-
-        //}
-
-        if !worklist.ok.is_empty() {
-            flow.post(&mut worklist).await?;
-            log::info!("Successfully announced {} files using {}.", worklist.ok.len(), config_file);
-        }
+        log::info!("Successfully announced {} files using {}.", total_count, config_file);
         flow.shutdown().await?;
     }
 
