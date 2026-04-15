@@ -51,6 +51,8 @@ pub struct Config {
     pub configname: Option<String>,
     pub broker: Option<Broker>,
     pub exchange: String,
+    pub exchange_suffix: Option<String>,
+    pub report_exchange: Option<String>,
     pub queue_name: String,
     pub prefetch: u32,
     pub expire: Option<f64>,
@@ -63,10 +65,17 @@ pub struct Config {
     pub accept_unmatched: bool,
     pub directory: PathBuf,
     pub download: bool,
+    pub report: bool,
+    pub strip: u32,
+    pub accel_threshold: u32,
+    pub time_copy: bool,
+    pub message_debug_dump: bool,
     pub mirror: bool,
     pub instances: u32,
     pub housekeeping: u32, // seconds
     pub message_count_max: u32,
+    pub max_inflight_messages: u32,
+
     pub log_level: String,
     pub buffer_size: u64,
     
@@ -143,15 +152,21 @@ impl Default for Config {
             broker: None,
             buffer_size: 4192,
             exchange: "xpublic".to_string(),
+            exchange_suffix: None,
+            report_exchange: None,
             queue_name: "q_${BROKER_USER}.${COMPONENT}.${CONFIG}.${QUEUESHARE}".to_string(),
             prefetch: 10,
+            accel_threshold: 0,
+            strip: 0,
             expire: None,
             cluster: None,
             hostname: None,
+            report: false,
             source: None,
             subtopics: Vec::new(),
             topic_prefix: vec!["v02".to_string(), "post".to_string()],
             masks: Vec::new(),
+            max_inflight_messages: 0,
             accept_unmatched: true,
             directory: PathBuf::from("."),
             download: false,
@@ -159,6 +174,7 @@ impl Default for Config {
             instances: 1,
             housekeeping: 300,
             message_count_max: 0,
+            message_debug_dump: false,
             log_level: "info".to_string(),
             credentials: CredentialDb::new(),
             subscriptions: Vec::new(),
@@ -189,6 +205,7 @@ impl Default for Config {
             perm_dir_default: 0,
             post_on_start: false,
             force_polling: false,
+            time_copy: false,
             identity_method: "sha512".to_string(),
             post_paths: Vec::new(),
             memory_max: 0,
@@ -398,7 +415,7 @@ impl Config {
                 None
             };
 
-            let result = match k {
+            let _result = match k {
                 "admin" => {
                     if let Some(ref val) = v {
                         self.admin = Some(Broker::parse(val).map_err(|e| ConfigError::ParseContext {
@@ -478,6 +495,12 @@ impl Config {
                     }
                     Ok(())
                 }
+                "exchangeSuffix" => {
+                    if let Some(ref val) = v {
+                        self.exchange_suffix = Some(val.to_string());
+                    }
+                    Ok(())
+                }
                 "queueName" => {
                     if let Some(ref val) = v {
                         self.queue_name = val.to_string();
@@ -532,9 +555,27 @@ impl Config {
                     }
                     Ok(())
                 }
+                "accelThreshold" => {
+                    if let Some(ref val) = v {
+                        self.accel_threshold = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "max_inflight_messages" => {
+                    if let Some(ref val) = v {
+                        self.max_inflight_messages = parse_count(val);
+                    }
+                    Ok(())
+                }
                 "prefetch" => {
                     if let Some(ref val) = v {
                         self.prefetch = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "messageDebugDump" => {
+                    if let Some(ref val) = v {
+                        self.message_debug_dump = is_true(val);
                     }
                     Ok(())
                 }
@@ -553,6 +594,12 @@ impl Config {
                 "instances" => {
                     if let Some(ref val) = v {
                         self.instances = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "report_exchange" => {
+                    if let Some(ref val) = v {
+                        self.report_exchange = Some(val.to_string());
                     }
                     Ok(())
                 }
@@ -657,6 +704,7 @@ impl Config {
                 "post_baseDir" => {
                     if let Some(ref val) = v {
                         self.post_base_dir = Some(PathBuf::from(val));
+                        log::warn!("pbd: {:?}", self.post_base_dir);
                     }
                     Ok(())
                 }
@@ -833,9 +881,9 @@ impl Config {
                 }
             };
 
-            if let Err(e) = result {
+            /*if let Err(e) = result {
                 return Err(e);
-            }
+            }*/
         }
         Ok(())
     }

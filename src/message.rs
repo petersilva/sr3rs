@@ -50,6 +50,7 @@ impl Message {
         let abs_path = std::fs::canonicalize(path).map_err(|e| anyhow::anyhow!("Failed to canonicalize path {:?}: {}", path, e))?;
         let metadata = std::fs::metadata(&abs_path)?;
 
+        /*
         let base_dir = config.post_base_dir.as_ref()
             .or(Some(&config.directory))
             .ok_or_else(|| anyhow::anyhow!("No directory or post_baseDir configured"))?;
@@ -64,12 +65,18 @@ impl Message {
         );
 
         let abs_base_dir = std::fs::canonicalize(&expanded_base_dir).unwrap_or_else(|_| std::path::PathBuf::from(&expanded_base_dir));
+         */
+
+        let abs_base_dir = "/";
 
         let rel_path = abs_path.strip_prefix(&abs_base_dir)
             .unwrap_or_else(|_| abs_path.as_path());
         
+        /*
         let base_url = config.post_base_url.as_deref()
             .unwrap_or("file://localhost/"); // Fallback
+         */
+        let base_url = "file:/" ;
 
         let mut msg = Self::new(base_url, &rel_path.to_string_lossy());
         msg.fields.insert("size".to_string(), metadata.len().to_string());
@@ -77,7 +84,7 @@ impl Message {
         // identity if it is a file, fileOp if not.
         if metadata.is_file() {
             let mut id =  crate::identity::factory( &config.identity_method ).unwrap();
-            id.update_file( &abs_path.to_str().unwrap() );
+            let _ = id.update_file( &abs_path.to_str().unwrap() );
             msg.identity.insert( "method".to_string(), id.get_method() );
             msg.identity.insert( "value".to_string(), id.value() );
         } else if metadata.is_dir() {
@@ -97,7 +104,7 @@ impl Message {
             let dt: chrono::DateTime<chrono::Utc> = mtime.into();
             msg.fields.insert("atime".to_string(), dt.to_rfc3339());
         }
-        log::debug!( "message::from_file Message {:?}", &msg );
+        log::warn!( "message::from_file Message {:?}", &msg );
 
         Ok(msg)
     }

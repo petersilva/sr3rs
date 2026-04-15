@@ -1,4 +1,4 @@
-//
+
 // This file is part of sr3rs a rust implementation of Sarracenia. ( https://metpx.github.io/sarracenia )
 // Copyright (C) Peter Silva, 2026
 //
@@ -7,6 +7,7 @@ use crate::message::Message;
 use crate::Config;
 use async_trait::async_trait;
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -113,7 +114,64 @@ pub trait Flow: Send + Sync {
             metrics.flow.msg_count_rejected += rejected_count;
         }
 
-        worklist.incoming = filtered_incoming;
+        let mut final_incoming = Vec::with_capacity(filtered_incoming.len());
+
+        for mut msg in filtered_incoming { // this loop is updateFieldsAccepted from python...
+            let mirror = msg.delete_on_post.get("_mirror").map(|s| s == "true").unwrap_or(false);
+            let raw_dest_dir = msg.delete_on_post.get("_dest_dir").cloned().unwrap_or_else(|| ".".to_string());
+            
+            ::log::debug!(" raw_dest_dir: {:?} mirror: {:?}", raw_dest_dir, mirror);
+            let mut vars = config.options.clone();
+            for (k, v) in &msg.fields {
+                vars.insert(k.clone(), v.clone());
+            }
+
+            let mut new_dir = crate::config::variable_expansion::expand_variables(&raw_dest_dir, &vars);
+            ::log::debug!("2nd raw_dest_dir: {:?} mirror: {:?}", raw_dest_dir, mirror);
+
+            let rel_path = msg.rel_path.clone();
+            let parts: Vec<&str> = rel_path.split('/').collect();
+            let filename = parts.last().unwrap_or(&"");
+
+            if mirror && parts.len() > 1 {
+                let dir_parts = format!("/{}",parts[..parts.len() - 1].join("/"));
+                if !new_dir.is_empty() && new_dir != "." {
+                    new_dir.push('/');
+                    new_dir.push_str(&dir_parts);
+                } else {
+                    new_dir = dir_parts;
+                }
+            }
+            msg.delete_on_post.insert("new_dir".to_string(), new_dir.clone());
+            msg.delete_on_post.insert("new_file".to_string(), filename.to_string());
+
+
+            ::log::debug!(" new_dir: {:?}, filename: {:?}", new_dir, filename);
+            let mut new_full_path = if new_dir.is_empty() || new_dir == "." {
+                 filename.to_string()
+            } else {
+                 format!("{}/{}", new_dir, filename)
+            };
+            ::log::debug!(" post_base_dir: {:?}, new_full_path: {:?}", config.post_base_dir, new_full_path);
+
+             // Strip post_base_dir from the new_relPath if configured
+            if let Some(ref pbd) = config.post_base_dir {
+                let pbd_str = crate::config::variable_expansion::expand_variables(&pbd.to_string_lossy(), &vars);
+                if pbd_str.len() > 1 && new_full_path.to_string().starts_with(&pbd_str) {
+                    new_full_path = new_full_path[pbd_str.len()..].to_string();
+                    if new_full_path.starts_with('/') {
+                        new_full_path = new_full_path[1..].to_string();
+                    }
+                }
+            }
+
+            msg.delete_on_post.insert("new_relPath".to_string(), new_full_path);
+
+            ::log::debug!("updatedFields for Accepted message : {:?} ", msg);
+            final_incoming.push(msg);
+        }
+
+        worklist.incoming = final_incoming;
         
         for cb_mutex in self.callbacks() {
             let cb = cb_mutex.lock().await;
@@ -129,7 +187,10 @@ pub trait Flow: Send + Sync {
         Ok(())
     }
 
-    async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }
+    async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { 
+        ::log::warn!("AcCepting!? " );
+        Ok(()) 
+    }
     
     async fn work(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let config = self.config();
@@ -215,6 +276,36 @@ pub trait Flow: Send + Sync {
         Ok(())
     }
 
+    fn message_adjust_post(&self, m: &mut Message, p: &crate::config::publisher::Publisher ) {
+
+        ::log::warn!("message_adjust_post publisher p: {:?}", p );
+
+        let new_full_path =  PathBuf::from(m.delete_on_post.get("new_dir").unwrap()).join(m.delete_on_post.get("new_file").unwrap() );
+
+        ::log::warn!("message_adjust_post new_full_path: {:?}", new_full_path );
+        ::log::warn!("message_adjust_post post_base_url: {:?}, post_base_dir: {:?}", p.base_url, p.base_dir );
+
+       
+        if let Some(base) = &p.base_dir {
+            match new_full_path.strip_prefix(base) {
+                Ok(new_rel_path) => {
+                    ::log::debug!("Relative path: {}", new_rel_path.display());
+                    m.rel_path = new_rel_path.to_string_lossy().into_owned();
+                }
+                Err(_) => {
+                    ::log::warn!("Base is not a prefix of the full path");
+                }
+            }
+        }
+        
+        // deferred: presence of m.delete_on_post.get("post_url") as an override.
+
+        m.base_url = p.base_url.clone().unwrap();
+
+        // deferred: convert to windows backslashes in path.
+        ::log::warn!("message_adjust_post new_rel_path: {:?}", m.rel_path );
+    }
+
     async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let publishers = self.publishers();
         if publishers.is_empty() {
@@ -233,9 +324,12 @@ pub trait Flow: Send + Sync {
         let mut failed_count = 0;
         let mut bytes_out = 0;
 
-        for m in worklist.ok.drain(..) {
+        for mut m in worklist.ok.drain(..) {
+
+            ::log::warn!( "posting message: {:?}", m);
             let mut failed_indices = Vec::new();
             for (idx, pub_mutex) in publishers.iter().enumerate() {
+                self.message_adjust_post( &mut m, &self.config().publishers[idx] );
                 let mut p = pub_mutex.lock().await;
                 if let Err(e) = p.publish_mut(&m).await {
                     ::log::error!("POST: failed to publish to {}: {}", redact_url(&p.broker_url), e);
@@ -269,6 +363,28 @@ pub trait Flow: Send + Sync {
     async fn ack(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { 
         Ok(())
     }
+
+    fn message_adjust_work(&self, m: &mut Message) {
+
+        if m.delete_on_post.contains_key("new_base_url") {
+
+            m.delete_on_post.insert("old_base_url".to_string(), m.base_url.clone() );
+
+            m.base_url = m.delete_on_post.get("new_base_url").clone().unwrap().to_string();  
+            ::log::warn!("adjusting new_base_url: {:?}", m.base_url );
+        }
+
+        if m.delete_on_post.contains_key("new_rel_path") {
+            // Deferred: check file name matches rel_path last element, update rel_path if need be.
+
+            m.delete_on_post.insert("old_rel_path".to_string(), m.rel_path.clone() );
+
+            m.rel_path = m.delete_on_post.get("new_rel_path").clone().unwrap().to_string();  
+            ::log::warn!("adjusting new_rel_path: {:?}", m.rel_path );
+        }
+
+    }
+
 
     async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<usize> {
         let config = self.config();
@@ -306,6 +422,19 @@ pub trait Flow: Send + Sync {
         self.filter(worklist).await?;
         self.accept(worklist).await?;
         self.work(worklist).await?;
+
+        // adjust message after action is done, but before 'after_work' so adjustment is possible.
+
+        let mut next_ok = Vec::new();
+        for mut m in worklist.ok.drain(..) {
+            if config.publishers.len() <= 1 {
+                self.message_adjust_work( &mut m);
+                next_ok.push(m);
+            } else {
+                ::log::error!("multiple publisher feature deferred");
+            }
+        }
+        worklist.ok = next_ok;
 
         for cb_mutex in self.callbacks() {
             let cb = cb_mutex.lock().await;

@@ -71,7 +71,7 @@ impl GatherFilePlugin {
             return Err(anyhow::anyhow!("Skipping . or .."));
         }
 
-        let mut msg = Message::from_file(path, &self.config)?;
+        let msg = Message::from_file(path, &self.config)?;
 
         // Check age
         if let Ok(metadata) = fs::metadata(path) {
