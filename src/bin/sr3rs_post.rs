@@ -6,7 +6,6 @@
 use clap::Parser;
 use sr3rs::Config;
 use sr3rs::flow::{Flow, subscribe::SubscribeFlow, Worklist};
-use sr3rs::message::Message;
 use sr3rs::utils::{setup_logging, resolve_patterns};
 use anyhow::Result;
 
