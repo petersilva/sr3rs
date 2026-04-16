@@ -127,12 +127,12 @@ pub trait Flow: Send + Sync {
             }
 
             let mut new_dir = crate::config::variable_expansion::expand_variables(&raw_dest_dir, &vars);
-            ::log::debug!("2nd raw_dest_dir: {:?} mirror: {:?}", raw_dest_dir, mirror);
 
             let rel_path = msg.rel_path.clone();
             let parts: Vec<&str> = rel_path.split('/').collect();
             let filename = parts.last().unwrap_or(&"");
 
+            ::log::debug!("2nd raw_dest_dir: {:?} mirror: {:?}, parts: {:?}, filename: {:?}", raw_dest_dir, mirror, parts, filename);
             if mirror && parts.len() > 1 {
                 let dir_parts = format!("/{}",parts[..parts.len() - 1].join("/"));
                 if !new_dir.is_empty() && new_dir != "." {

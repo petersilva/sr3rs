@@ -282,7 +282,7 @@ impl Flow for SubscribeFlow {
                 match tokio::time::timeout(tokio::time::Duration::from_millis(500), consumer.moth.consume()).await {
                     Ok(Ok(Some(mut msg))) => {
                         log::debug!("GATHER: received message");
-                        msg.fields.insert("_consumer_idx".to_string(), consumer.subscription_idx.to_string());
+                        msg.delete_on_post.insert("_consumer_idx".to_string(), consumer.subscription_idx.to_string());
                         worklist.incoming.push(msg);
                         count += 1;
                         total_gathered += 1;
@@ -325,7 +325,7 @@ impl Flow for SubscribeFlow {
             let idx_str = consumer.subscription_idx.to_string();
 
             for m in &worklist.ok {
-                if m.fields.get("_consumer_idx") == Some(&idx_str) {
+                if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
                         let _ = consumer.moth.ack(ack_id).await;
                     }
@@ -333,7 +333,7 @@ impl Flow for SubscribeFlow {
             }
             
             for m in &worklist.rejected {
-                if m.fields.get("_consumer_idx") == Some(&idx_str) {
+                if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
                         let _ = consumer.moth.ack(ack_id).await;
                     }
@@ -341,7 +341,7 @@ impl Flow for SubscribeFlow {
             }
 
             for m in &worklist.failed {
-                if m.fields.get("_consumer_idx") == Some(&idx_str) {
+                if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
                         let _ = consumer.moth.nack(ack_id).await;
                     }

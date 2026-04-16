@@ -704,7 +704,6 @@ impl Config {
                 "post_baseDir" => {
                     if let Some(ref val) = v {
                         self.post_base_dir = Some(PathBuf::from(val));
-                        log::warn!("pbd: {:?}", self.post_base_dir);
                     }
                     Ok(())
                 }

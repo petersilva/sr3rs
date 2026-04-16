@@ -262,7 +262,7 @@ impl Flow for SenderFlow {
             while total_gathered < batch_size && count < (batch_size / self.consumers.len()).max(1) {
                 match tokio::time::timeout(tokio::time::Duration::from_millis(500), consumer.moth.consume()).await {
                     Ok(Ok(Some(mut msg))) => {
-                        msg.fields.insert("_consumer_idx".to_string(), consumer.subscription_idx.to_string());
+                        msg.delete_on_post.insert("_consumer_idx".to_string(), consumer.subscription_idx.to_string());
                         worklist.incoming.push(msg);
                         count += 1;
                         total_gathered += 1;
@@ -342,8 +342,8 @@ impl Flow for SenderFlow {
                 }
 
                 // Remote location: new_dir + new_file
-                let remote_dir = m.fields.get("new_dir").cloned().unwrap_or_else(|| ".".to_string());
-                let remote_file_name = m.fields.get("new_file").cloned().unwrap_or_else(|| m.rel_path.clone());
+                let remote_dir = m.delete_on_post.get("new_dir").cloned().unwrap_or_else(|| ".".to_string());
+                let remote_file_name = m.delete_on_post.get("new_file").cloned().unwrap_or_else(|| m.rel_path.clone());
                 
                 let remote_full_path = if remote_dir == "." || remote_dir.is_empty() {
                     remote_file_name
@@ -384,7 +384,7 @@ impl Flow for SenderFlow {
             let idx_str = consumer.subscription_idx.to_string();
 
             for m in &worklist.ok {
-                if m.fields.get("_consumer_idx") == Some(&idx_str) {
+                if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
                         let _ = consumer.moth.ack(ack_id).await;
                     }
@@ -392,7 +392,7 @@ impl Flow for SenderFlow {
             }
             
             for m in &worklist.rejected {
-                if m.fields.get("_consumer_idx") == Some(&idx_str) {
+                if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
                         let _ = consumer.moth.ack(ack_id).await;
                     }
@@ -400,7 +400,7 @@ impl Flow for SenderFlow {
             }
 
             for m in &worklist.failed {
-                if m.fields.get("_consumer_idx") == Some(&idx_str) {
+                if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
                         let _ = consumer.moth.nack(ack_id).await;
                     }
