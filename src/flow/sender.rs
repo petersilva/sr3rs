@@ -132,6 +132,10 @@ impl Flow for SenderFlow {
         self.publishers.clone()
     }
 
+    fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> {
+        self.base.callbacks.clone()
+    }
+
     async fn connect_exchanges(&mut self) -> anyhow::Result<()> {
         let publishers_config = self.base.config.publishers.clone();
         for p_cfg in publishers_config {

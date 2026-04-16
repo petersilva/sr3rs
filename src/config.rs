@@ -873,11 +873,14 @@ impl Config {
                     Ok(())
                 }
                 _ => {
-                    Err(ConfigError::ParseContext {
-                        file: filename.to_string(),
-                        line: line_no,
-                        message: format!("Unknown option: {}", k),
-                    })
+                    // Unknown options might be used by plugins, capture them in self.options
+                    if let Some(ref val) = v {
+                        self.options.insert(k.to_string(), val.to_string());
+                    } else {
+                        // Insert a boolean flag or just empty string if no value
+                        self.options.insert(k.to_string(), "true".to_string());
+                    }
+                    Ok::<(), ConfigError>(())
                 }
             };
 

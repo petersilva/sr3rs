@@ -11,6 +11,17 @@ use async_trait::async_trait;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
+#[pyfunction]
+fn rust_log(level: u32, target: String, msg: String) {
+    match level {
+        50 | 40 => ::log::error!(target: &target, "{}", msg),
+        30 => ::log::warn!(target: &target, "{}", msg),
+        20 => ::log::info!(target: &target, "{}", msg),
+        10 => ::log::debug!(target: &target, "{}", msg),
+        _ => ::log::trace!(target: &target, "{}", msg),
+    }
+}
+
 pub struct PyWrapperPlugin {
     name: String,
     instance: PyObject,
@@ -27,6 +38,8 @@ impl PyWrapperPlugin {
                 path.call_method1("append", (plugins_str,))?;
             }
 
+            path.call_method1("append", ("/home/peter/Sarracenia/sr3",))?;
+            path.call_method1("append", ("/home/peter/Sarracenia/sr3/sarracenia",))?;
             path.call_method1("append", (".",))?;
 
             let (module_name, class_name) = if !factory_path.contains('.') {
@@ -35,15 +48,28 @@ impl PyWrapperPlugin {
                     None => String::new(),
                     Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
                 };
-                (factory_path, capitalized)
+                (factory_path.to_string(), capitalized)
             } else {
                 let parts: Vec<&str> = factory_path.rsplitn(2, '.').collect();
-                (parts[1], parts[0].to_string())
+                let last_part = parts[0];
+                let mut chars = last_part.chars();
+                let first_char = chars.next();
+                
+                if let Some(c) = first_char {
+                    if c.is_lowercase() {
+                        let capitalized = c.to_uppercase().collect::<String>() + chars.as_str();
+                        (factory_path.to_string(), capitalized)
+                    } else {
+                        (parts[1].to_string(), last_part.to_string())
+                    }
+                } else {
+                    (parts[1].to_string(), last_part.to_string())
+                }
             };
 
             ::log::debug!("Loading Python plugin module '{}', class '{}'", module_name, class_name);
 
-            let module = match py.import(module_name) {
+            let module = match py.import(module_name.as_str()) {
                 Ok(m) => m,
                 Err(e) => {
                     let fallback = format!("sarracenia.flowcb.{}", module_name);
@@ -53,9 +79,78 @@ impl PyWrapperPlugin {
 
             let class = module.getattr(class_name.as_str())?;
             
-            let options = PyDict::new(py);
-            options.set_item("component", &_config.component)?;
-            options.set_item("config", _config.configname.clone().unwrap_or_else(|| "unknown".to_string()))?;
+            let py_config_code = r#"
+import logging
+
+class RustLogHandler(logging.Handler):
+    def __init__(self, rust_log_fn):
+        super().__init__()
+        self.rust_log_fn = rust_log_fn
+        self.setFormatter(logging.Formatter('%(message)s'))
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.rust_log_fn(record.levelno, record.name, msg)
+        except Exception:
+            self.handleError(record)
+
+def setup_logging(rust_log_fn):
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    handler = RustLogHandler(rust_log_fn)
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    logging.info("Python logging successfully routed to Rust log crate.")
+
+class MockConfig:
+    def __init__(self, kwargs, options_map):
+        self._options_map = options_map
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        if 'post_baseDir' not in kwargs:
+            setattr(self, 'post_baseDir', None)
+
+    def add_option(self, name, kind, default=None, *args):
+        if name in self._options_map:
+            val = self._options_map[name]
+            logging.info("MockConfig: add_option found %s in options_map with value %s", name, val)
+            if kind == 'list':
+                val = [val]
+            elif kind == 'set':
+                val = set([x.strip() for x in val.split(',')])
+            elif kind == 'flag':
+                val = str(val).lower() in ('true', '1', 'yes')
+            elif kind == 'count' or kind == 'int':
+                val = int(val)
+            setattr(self, name, val)
+        else:
+            logging.info("MockConfig: add_option did NOT find %s in options_map, using default %s", name, default)
+            if not hasattr(self, name):
+                setattr(self, name, default)
+"#;
+            let mock_module = PyModule::from_code(py, py_config_code, "mockconfig.py", "mockconfig")?;
+
+            let rust_log_fn = pyo3::wrap_pyfunction!(rust_log, mock_module)?;
+            mock_module.call_method1("setup_logging", (rust_log_fn,))?;
+
+            let mock_class = mock_module.getattr("MockConfig")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("component", &_config.component)?;
+            kwargs.set_item("config", _config.configname.clone().unwrap_or_else(|| "unknown".to_string()))?;
+            kwargs.set_item("logLevel", &_config.log_level)?;
+            if let Some(pbd) = &_config.post_base_dir {
+                kwargs.set_item("post_baseDir", pbd.to_string_lossy().to_string())?;
+            }
+
+            let options_map = PyDict::new(py);
+            for (k, v) in &_config.options {
+                options_map.set_item(k, v)?;
+            }
+
+            let options = mock_class.call1((kwargs, options_map))?;
             
             let instance = class.call1((options,))?;
             
@@ -77,6 +172,9 @@ impl PyWrapperPlugin {
         for (k, v) in &msg.fields {
             dict.set_item(k, v)?;
         }
+        for (k, v) in &msg.delete_on_post {
+            dict.set_item(k, v)?;
+        }
         Ok(dict)
     }
 
@@ -89,7 +187,11 @@ impl PyWrapperPlugin {
             let k_str: String = k.extract()?;
             if k_str != "baseUrl" && k_str != "relPath" {
                 if let Ok(v_str) = v.extract::<String>() {
-                    msg.fields.insert(k_str, v_str);
+                    if k_str.starts_with("new_") || k_str.starts_with("_") {
+                        msg.delete_on_post.insert(k_str, v_str);
+                    } else {
+                        msg.fields.insert(k_str, v_str);
+                    }
                 }
             }
         }
@@ -118,6 +220,23 @@ impl PyWrapperPlugin {
 impl FlowCB for PyWrapperPlugin {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    async fn on_start(&mut self) -> anyhow::Result<()> {
+        ::log::info!("PyWrapperPlugin::on_start called for {}", self.name);
+        let instance_clone = self.instance.clone();
+        let join_handle: tokio::task::JoinHandle<PyResult<()>> = tokio::task::spawn_blocking(move || {
+            Python::with_gil(|py| -> PyResult<()> {
+                if instance_clone.as_ref(py).hasattr("on_start")? {
+                    instance_clone.call_method0(py, "on_start")?;
+                } else {
+                    ::log::info!("Python plugin does not have on_start method");
+                }
+                Ok(())
+            })
+        });
+        join_handle.await.unwrap().map_err(|e| anyhow::anyhow!("Python plugin error in on_start: {:?}", e))?;
+        Ok(())
     }
 
     async fn after_accept(&self, wl: &mut Worklist) -> anyhow::Result<()> {
