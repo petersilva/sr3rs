@@ -425,6 +425,7 @@ pub trait Flow: Send + Sync {
 
         // adjust message after action is done, but before 'after_work' so adjustment is possible.
 
+        /* I think message_adjust_work does nothing useful.
         let mut next_ok = Vec::new();
         for mut m in worklist.ok.drain(..) {
             if config.publishers.len() <= 1 {
@@ -435,6 +436,7 @@ pub trait Flow: Send + Sync {
             }
         }
         worklist.ok = next_ok;
+        */
 
         for cb_mutex in self.callbacks() {
             let cb = cb_mutex.lock().await;
@@ -698,4 +700,29 @@ mod tests {
         assert_eq!(wl.incoming[0].rel_path, "accept_me.txt");
         assert_eq!(wl.rejected.len(), 2);
     }
+ 
+    #[test] 
+    fn test_message_adjust_post() {
+       let mut m = crate::message::Message::new("file:/", "home/peter/Sarracenia/bugs/samples/data/20200105/WXO-DD/meteocode/atl/csv/2020-01-05T03-00-01Z_FPHX14_r10zf_CC.csv");
+       m.delete_on_post.insert("new_dir".to_string(), "/home/peter/Sarracenia/bugs/samples/data/20200105/WXO-DD/meteocode/atl/csv".to_string() );
+       m.delete_on_post.insert("new_file".to_string(), "2020-01-05T03-00-01Z_FPHX14_r10zf_CC.csv".to_string() );
+
+       let config = Config::new();
+       let mut publ = crate::config::publisher::Publisher::new(
+           None, 
+           vec!["xsarra".to_string()], 
+           vec!["v03.post".to_string()], 
+           "v03".to_string()
+       );
+       publ.base_url = Some("http://localhost:8090".to_string());
+       publ.base_dir = Some(PathBuf::from("/home/peter/Sarracenia/bugs/samples/data"));
+
+       let flow = BaseFlow::new(config);
+
+       flow.message_adjust_post(&mut m, &publ);
+       
+       assert_eq!(m.base_url, "http://localhost:8090" );
+       assert_eq!(m.rel_path, "20200105/WXO-DD/meteocode/atl/csv/2020-01-05T03-00-01Z_FPHX14_r10zf_CC.csv" );
+    }
 }
+  
