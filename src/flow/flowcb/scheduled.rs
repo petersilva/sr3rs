@@ -159,9 +159,9 @@ impl FlowCB for ScheduledPlugin {
     async fn gather(&mut self, worklist: &mut Worklist) -> anyhow::Result<()> {
         if self.ready_to_gather() {
             for rel_path in &self.config.post_paths {
-                match Message::from_file(std::path::Path::new(rel_path), &self.config) {
+                match Message::from_file(std::path::Path::new(rel_path), &self.config, std::path::Path::new(rel_path)) {
                     Ok(msg) => worklist.incoming.push(msg),
-                    Err(e) => ::log::error!("Scheduled: failed to build message for {}: {}", rel_path, e),
+                    Err(e) => ::log::error!("Scheduled: failed to build message for {}: {}", rel_path.to_str().unwrap(), e),
                 }
             }
         }

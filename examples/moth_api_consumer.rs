@@ -8,7 +8,7 @@ use rand::Rng;
 async fn main() -> Result<()> {
     // 1. Setup broker
     let broker_url = "amqps://anonymous:anonymous@hpfx.collab.science.gc.ca/";
-    let mut broker = Broker::parse(broker_url)?;
+    let broker = Broker::parse(broker_url)?;
     
     println!("Connecting to broker: {}", broker_url);
 

@@ -186,9 +186,14 @@ impl Moth for Amqp091 {
                 headers.insert(k.into(), lapin::types::AMQPValue::LongString(v.into()));
             }
             
-            // Python's behavior replaces '*' and '#' in the routing_key (topic).
+            
             let safe_topic = derived_topic.replace("#", "%23").replace("*", "%22");
             
+            log::debug!("MOTH: AMQP 0.9.1 publish 1: topic {:?}  exchang: {:?}", safe_topic, exchange );
+            log::debug!("MOTH: AMQP 0.9.1 publish 2: headers {:?} ", headers );
+            log::debug!("MOTH: AMQP 0.9.1 publish 3: body {:?} ", raw_body );
+
+            // Python's behavior replaces '*' and '#' in the routing_key (topic).
             self.channel.basic_publish(
                 exchange,
                 &safe_topic,

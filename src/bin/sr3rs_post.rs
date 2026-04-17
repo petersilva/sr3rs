@@ -4,6 +4,7 @@
 //
 
 use clap::Parser;
+use std::path::PathBuf;
 use sr3rs::Config;
 use sr3rs::flow::{Flow, subscribe::SubscribeFlow, Worklist};
 use sr3rs::utils::{setup_logging, resolve_patterns};
@@ -62,7 +63,10 @@ async fn main() -> Result<()> {
          }
 
         config_obj.finalize()?;
-        config_obj.post_paths = cli.files.clone();
+        config_obj.post_paths = cli.files.iter().map(PathBuf::from).collect();
+
+
+
         let mut flow = SubscribeFlow::new(config_obj);
         let mut total_count = 0;
         flow.connect().await?;

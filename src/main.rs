@@ -4,6 +4,7 @@
 //
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use sr3rs::Config;
 use sr3rs::flow::{Flow, Worklist, subscribe::SubscribeFlow, sender::SenderFlow};
 use sr3rs::config::paths;
@@ -926,7 +927,7 @@ async fn main() -> Result<()> {
                 config_obj.finalize()?;
 
                 // Pass the files from CLI to the gather plugin via config
-                config_obj.post_paths = files.clone();
+                config_obj.post_paths = files.iter().map(PathBuf::from).collect();
 
                 let mut flow = SubscribeFlow::new(config_obj);
                 let mut total_announced = 0;

@@ -71,18 +71,18 @@ pub fn topic_derive(msg: &Message, options: &serde_json::Value) -> Vec<String> {
         if !msg.rel_path.is_empty() {
             let parts: Vec<&str> = msg.rel_path.split('/').collect();
             if parts.len() > 1 {
-                for part in &parts[0..parts.len() - 1] {
+                for part in &parts[0..parts.len() - 2] {
                     topic.push((*part).to_string());
                 }
+                ::log::error!(" normal topic derivation path: {:?}", topic );
             }
-        } else if let Some(subtopic) = msg.fields.get("subtopic") {
+        } else if let Some(subtopic) = msg.delete_on_post.get("subtopic") {
             let parts: Vec<&str> = subtopic.split('.').collect();
             for part in parts {
                 topic.push(part.to_string());
             }
         }
     }
-
     topic
 }
 

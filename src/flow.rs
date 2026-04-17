@@ -70,6 +70,76 @@ pub trait Flow: Send + Sync {
     
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
     
+    /// Adjust needed fields once a message is accepted.
+    /// The most important one being *new_dir*, which is the directory into which the file will be written.
+    /// Also populate *new_file* which is the name the file is to be written to locally.
+    /// Plugins are supposed to modify these delete_on_post keys in order to modify file placement.
+    /// Each message gets the _mirror boolean setting, as well as the _dest_dir which is the base directory
+    /// to from which relative path trees would start.
+
+    fn message_adjust_filter(&self, msg: &mut Message ) {
+        ::log::debug!("message_adjust_filter START" );
+        let mirror = msg.delete_on_post.get("_mirror").map(|s| s == "true").unwrap_or(false);
+        let raw_dest_dir = msg.delete_on_post.get("_dest_dir").cloned().unwrap_or_else(|| ".".to_string());
+        let config = self.config();
+
+        ::log::debug!(" raw_dest_dir: {:?} mirror: {:?}", raw_dest_dir, mirror);
+        let mut vars = config.options.clone();
+        for (k, v) in &msg.fields {
+            vars.insert(k.clone(), v.clone());
+        }
+
+        // Fundamental problem here... if expanding raw_dest_dir... should give the root of the tree.
+        // if relPath was from / ... so instead of destdir.. it could be something wildly different.
+        // 
+        let dest_dir = crate::config::variable_expansion::expand_variables(&raw_dest_dir, &vars);
+        let mut rel_path = msg.rel_path.clone();
+
+        ::log::debug!("initial dest_dir: {:?} mirror: {:?}, rel_path: {:?}", dest_dir, mirror, rel_path);
+
+        let new_rel_path = rel_path.strip_prefix(&dest_dir);
+        if new_rel_path != None {
+
+            msg.rel_path = new_rel_path.unwrap().to_string();
+            rel_path = msg.rel_path.clone();
+            // FIXME: adjust base_url if it is a file: ? 
+            // msg.base_url?
+        } 
+ 
+        let mut new_dir = dest_dir.clone();
+
+        // let new_dir = dest_dir + rel_path
+        let parts: Vec<&str> = rel_path.split('/').collect();
+        let filename = parts.last().unwrap_or(&"");
+
+        ::log::debug!("2nd raw_dest_dir: {:?} mirror: {:?}, parts: {:?}, filename: {:?}", raw_dest_dir, mirror, parts, filename);
+        if mirror && parts.len() > 1 {
+            let dir_parts = format!("{}",parts[..parts.len() - 1].join("/"));
+            if !new_dir.is_empty() && new_dir != "." {
+                if new_dir[new_dir.len()-2..new_dir.len()-1] != *"/" { 
+                    new_dir.push('/'); 
+                }
+                new_dir.push_str(&dir_parts);
+            } else {
+                new_dir = dir_parts;
+            }
+        }
+        msg.delete_on_post.insert("new_dir".to_string(), new_dir.clone());
+        msg.delete_on_post.insert("new_file".to_string(), filename.to_string());
+
+
+        ::log::debug!(" new_dir: {:?}, filename: {:?}", new_dir, filename);
+
+        let new_full_path = if new_dir.is_empty() || new_dir == "." {
+             filename.to_string()
+        } else {
+             format!("{}/{}", new_dir, filename)
+        };
+        ::log::debug!(" post_base_dir: {:?}, new_full_path: {:?}", config.post_base_dir, new_full_path);
+        ::log::debug!("message_adjust_filter END" );
+
+    }
+
     async fn filter(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let config = self.config();
         let mut filtered_incoming = Vec::new();
@@ -117,60 +187,10 @@ pub trait Flow: Send + Sync {
         let mut final_incoming = Vec::with_capacity(filtered_incoming.len());
 
         for mut msg in filtered_incoming { // this loop is updateFieldsAccepted from python...
-            let mirror = msg.delete_on_post.get("_mirror").map(|s| s == "true").unwrap_or(false);
-            let raw_dest_dir = msg.delete_on_post.get("_dest_dir").cloned().unwrap_or_else(|| ".".to_string());
-            
-            ::log::debug!(" raw_dest_dir: {:?} mirror: {:?}", raw_dest_dir, mirror);
-            let mut vars = config.options.clone();
-            for (k, v) in &msg.fields {
-                vars.insert(k.clone(), v.clone());
-            }
-
-            let mut new_dir = crate::config::variable_expansion::expand_variables(&raw_dest_dir, &vars);
-
-            let rel_path = msg.rel_path.clone();
-            let parts: Vec<&str> = rel_path.split('/').collect();
-            let filename = parts.last().unwrap_or(&"");
-
-            ::log::debug!("2nd raw_dest_dir: {:?} mirror: {:?}, parts: {:?}, filename: {:?}", raw_dest_dir, mirror, parts, filename);
-            if mirror && parts.len() > 1 {
-                let dir_parts = format!("/{}",parts[..parts.len() - 1].join("/"));
-                if !new_dir.is_empty() && new_dir != "." {
-                    new_dir.push('/');
-                    new_dir.push_str(&dir_parts);
-                } else {
-                    new_dir = dir_parts;
-                }
-            }
-            msg.delete_on_post.insert("new_dir".to_string(), new_dir.clone());
-            msg.delete_on_post.insert("new_file".to_string(), filename.to_string());
-
-
-            ::log::debug!(" new_dir: {:?}, filename: {:?}", new_dir, filename);
-            let mut new_full_path = if new_dir.is_empty() || new_dir == "." {
-                 filename.to_string()
-            } else {
-                 format!("{}/{}", new_dir, filename)
-            };
-            ::log::debug!(" post_base_dir: {:?}, new_full_path: {:?}", config.post_base_dir, new_full_path);
-
-             // Strip post_base_dir from the new_relPath if configured
-            if let Some(ref pbd) = config.post_base_dir {
-                let pbd_str = crate::config::variable_expansion::expand_variables(&pbd.to_string_lossy(), &vars);
-                if pbd_str.len() > 1 && new_full_path.to_string().starts_with(&pbd_str) {
-                    new_full_path = new_full_path[pbd_str.len()..].to_string();
-                    if new_full_path.starts_with('/') {
-                        new_full_path = new_full_path[1..].to_string();
-                    }
-                }
-            }
-
-            msg.delete_on_post.insert("new_relPath".to_string(), new_full_path);
-
+            self.message_adjust_filter(&mut msg);
             ::log::debug!("updatedFields for Accepted message : {:?} ", msg);
             final_incoming.push(msg);
         }
-
         worklist.incoming = final_incoming;
         
         for cb_mutex in self.callbacks() {
@@ -183,7 +203,6 @@ pub trait Flow: Send + Sync {
             let mut logger = logger_arc.lock().await;
             logger.after_accept(config, worklist);
         }
-
         Ok(())
     }
 
@@ -278,32 +297,53 @@ pub trait Flow: Send + Sync {
 
     fn message_adjust_post(&self, m: &mut Message, p: &crate::config::publisher::Publisher ) {
 
+        ::log::warn!("message_adjust_post START" );
         ::log::warn!("message_adjust_post publisher p: {:?}", p );
 
-        let new_full_path =  PathBuf::from(m.delete_on_post.get("new_dir").unwrap()).join(m.delete_on_post.get("new_file").unwrap() );
+        ::log::warn!("message_adjust_post new_dir: {:?} new_file: {:?}",  m.delete_on_post.get("new_dir").unwrap(), m.delete_on_post.get("new_file").unwrap() );
+
+        let new_dir = match m.delete_on_post.get("new_dir") {
+                Some(v) => v,
+                None => {
+                    ::log::error!("missing new_dir");
+                    return;
+                }
+            };
+
+        let new_file = match m.delete_on_post.get("new_file") {
+                Some(v) => v,
+                None => {
+                    ::log::error!("missing new_file");
+                    return;
+                }
+            };
+
+        let new_full_path = PathBuf::from(new_dir).join(new_file);
 
         ::log::warn!("message_adjust_post new_full_path: {:?}", new_full_path );
         ::log::warn!("message_adjust_post post_base_url: {:?}, post_base_dir: {:?}", p.base_url, p.base_dir );
 
-       
-        if let Some(base) = &p.base_dir {
-            match new_full_path.strip_prefix(base) {
+
+        if let Some(base_dir) = &p.base_dir {
+            match new_full_path.strip_prefix(base_dir) {
                 Ok(new_rel_path) => {
-                    ::log::debug!("Relative path: {}", new_rel_path.display());
                     m.rel_path = new_rel_path.to_string_lossy().into_owned();
                 }
                 Err(_) => {
-                    ::log::warn!("Base is not a prefix of the full path");
+                    ::log::warn!("strip_prefix failed");
                 }
             }
         }
         
         // deferred: presence of m.delete_on_post.get("post_url") as an override.
 
-        m.base_url = p.base_url.clone().unwrap();
+        if let Some(base_url) = &p.base_url {
+            m.base_url = base_url.clone();
+        }
 
         // deferred: convert to windows backslashes in path.
         ::log::warn!("message_adjust_post new_rel_path: {:?}", m.rel_path );
+        ::log::warn!("message_adjust_post END" );
     }
 
     async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
@@ -724,5 +764,21 @@ mod tests {
        assert_eq!(m.base_url, "http://localhost:8090" );
        assert_eq!(m.rel_path, "20200105/WXO-DD/meteocode/atl/csv/2020-01-05T03-00-01Z_FPHX14_r10zf_CC.csv" );
     }
+
+    #[test] 
+    fn test_message_adjust_filter() {
+       let mut m = crate::message::Message::new("file:/", "home/peter/sarra_devdocroot/downloaded_by_sub_amqp/20200105/WXO-DD/bulletins/alphanumeric/20200105/SX/KWAL/03/SXCN40_KWAL_050300___47957" );
+       m.delete_on_post.insert("_mirror".to_string(), "true".to_string() );
+       m.delete_on_post.insert("_dest_dir".to_string(), "/home/peter/sarra_devdocroot/downloaded_by_sub_amqp/20200105/WXO-DD/bulletins/alphanumeric/20200105/SX/KWAL/03/".to_string() );
+       
+       let config = Config::new();
+
+       let flow = BaseFlow::new(config);
+       flow.message_adjust_filter(&mut m);
+
+       assert_eq!(m.delete_on_post.get("new_dir").unwrap().to_string(), "/home/peter/sarra_devdocroot/downloaded_by_sub_amqp/20200105/WXO-DD/bulletins/alphanumeric/20200105/SX/KWAL/03" );
+       assert_eq!(m.delete_on_post.get("new_file").unwrap().to_string(), "SXCN40_KWAL_050300___47957".to_string() );
+    }
+     
 }
   

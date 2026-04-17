@@ -37,10 +37,35 @@ impl GatherFilePlugin {
         }
     }
 
-    pub fn walk(&self, dir: &Path) -> Vec<Message> {
+    /// longest_base_dir
+    /// walk the self.config.post_paths,
+    /// look for the value of each on in path;
+    /// return the longest post_path that is in path.
+    fn longest_base_dir(&self, path: &Path ) -> PathBuf {
+
+        let mut longest=PathBuf::from("/");
+        let mut candidates = self.config.post_paths.clone();
+        candidates.push( self.config.directory.clone() );
+
+        ::log::warn!("longest_base_dir: candidates: {:?}", candidates );
+        for base_dir in candidates {
+                if let Ok(rel_path) =  path.strip_prefix(&base_dir) {
+                        ::log::debug!("sub path: {}", rel_path.display());
+
+                        if base_dir.as_os_str().len() > longest.as_os_str().len() {
+                            longest=base_dir;
+                        }
+                }
+        }
+        ::log::warn!( "longest base for {:?}, is {:?}", path, longest );
+        longest
+    }
+
+
+    pub fn walk(&self, dir: &Path, base_dir: &Path) -> Vec<Message> {
         let mut messages = Vec::new();
         if dir.is_file() {
-            if let Ok(msg) = self.make_message(dir) {
+            if let Ok(msg) = self.make_message(dir,&base_dir) {
                 messages.push(msg);
             }
             return messages;
@@ -51,11 +76,11 @@ impl GatherFilePlugin {
                 let path = entry.path();
                 if path.is_dir() {
                     if self.config.recursive {
-                        let mut sub = self.walk(&path);
+                        let mut sub = self.walk(&path, &base_dir);
                         messages.append(&mut sub);
                     }
                 } else if path.is_file() {
-                    if let Ok(msg) = self.make_message(&path) {
+                    if let Ok(msg) = self.make_message(&path,&base_dir) {
                         messages.push(msg);
                     }
                 }
@@ -64,14 +89,14 @@ impl GatherFilePlugin {
         messages
     }
 
-    fn make_message(&self, path: &Path) -> anyhow::Result<Message> {
+    fn make_message(&self, path: &Path, base_dir: &Path) -> anyhow::Result<Message> {
         // Skip hidden files/directories
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if file_name == "." || file_name == ".." {
             return Err(anyhow::anyhow!("Skipping . or .."));
         }
-
-        let msg = Message::from_file(path, &self.config)?;
+        let bd = base_dir;
+        let msg = Message::from_file(path, &self.config, &bd)?;
 
         // Check age
         if let Ok(metadata) = fs::metadata(path) {
@@ -184,16 +209,16 @@ impl FlowCB for GatherFilePlugin {
                  for path_str in &self.config.post_paths {
                      let p = Path::new(path_str);
                      if p.exists() {
-                        let mut walked = self.walk(p);
+                        let mut walked = self.walk(p,p);
                         messages.append(&mut walked);
                      } else {
-                        ::log::warn!("GatherFile: CLI path does not exist: {}", path_str);
+                        ::log::warn!("GatherFile: CLI path does not exist: {}", path_str.to_str().unwrap() );
                      }
                  }
              } else if !self.initial_scan_done {
                  let watch_dir = self.config.directory.clone();
                  if watch_dir.exists() {
-                     messages = self.walk(&watch_dir);
+                     messages = self.walk(&watch_dir,&watch_dir);
                  }
              }
 
@@ -225,8 +250,9 @@ impl FlowCB for GatherFilePlugin {
             while count < batch_size {
                 match rx.try_recv() {
                     Ok(Ok(path)) => {
+                        let base_dir=self.longest_base_dir(&path);
                         if path.is_file() {
-                            if let Ok(msg) = self.make_message(&path) {
+                            if let Ok(msg) = self.make_message(&path,&base_dir) {
                                 worklist.incoming.push(msg);
                                 count += 1;
                             }

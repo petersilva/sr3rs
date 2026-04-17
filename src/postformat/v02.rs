@@ -72,7 +72,7 @@ impl PostFormat for V02 {
             msg.pub_time = dt;
         }
 
-        msg.fields.insert("subtopic".to_string(), serde_json::to_string(&rel_path.split('/').collect::<Vec<&str>>()).unwrap_or_default());
+        //msg.delete_on_post.insert("subtopic".to_string(), serde_json::to_string(&rel_path.split('/').collect::<Vec<&str>>()).unwrap_or_default());
         msg.fields.insert("to_clusters".to_string(), "ALL".to_string());
 
         if let Some(integrity) = msg.fields.remove("integrity") {

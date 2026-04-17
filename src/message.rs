@@ -46,7 +46,7 @@ impl Message {
         }
     }
 
-    pub fn from_file(path: &std::path::Path, config: &crate::Config) -> anyhow::Result<Self> {
+    pub fn from_file(path: &std::path::Path, config: &crate::Config, base_dir: &std::path::Path) -> anyhow::Result<Self> {
         let abs_path = std::fs::canonicalize(path).map_err(|e| anyhow::anyhow!("Failed to canonicalize path {:?}: {}", path, e))?;
         let metadata = std::fs::metadata(&abs_path)?;
 
@@ -67,18 +67,16 @@ impl Message {
         let abs_base_dir = std::fs::canonicalize(&expanded_base_dir).unwrap_or_else(|_| std::path::PathBuf::from(&expanded_base_dir));
          */
 
-        let abs_base_dir = "/";
-
-        let rel_path = abs_path.strip_prefix(&abs_base_dir)
+        let rel_path = abs_path.strip_prefix(&base_dir)
             .unwrap_or_else(|_| abs_path.as_path());
         
         /*
         let base_url = config.post_base_url.as_deref()
             .unwrap_or("file://localhost/"); // Fallback
          */
-        let base_url = "file:/" ;
+        let base_url = format!("file:{}", base_dir.to_string_lossy() ) ;
 
-        let mut msg = Self::new(base_url, &rel_path.to_string_lossy());
+        let mut msg = Self::new( &base_url, &rel_path.to_string_lossy());
         msg.fields.insert("size".to_string(), metadata.len().to_string());
 
         // identity if it is a file, fileOp if not.

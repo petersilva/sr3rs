@@ -49,6 +49,7 @@ pub struct Config {
     pub appname: String,
     pub component: String,
     pub configname: Option<String>,
+    pub base_dir: Option<PathBuf>,
     pub broker: Option<Broker>,
     pub exchange: String,
     pub exchange_suffix: Option<String>,
@@ -112,7 +113,7 @@ pub struct Config {
     pub post_on_start: bool,
     pub force_polling: bool,
     pub identity_method: String,
-    pub post_paths: Vec<String>,
+    pub post_paths: Vec<PathBuf>,
     pub memory_max: u64,
     pub memory_baseline_file: u32,
     pub memory_multiplier: f64,
@@ -149,6 +150,7 @@ impl Default for Config {
             appname: "sr3rs".to_string(),
             component: "flow".to_string(),
             configname: None,
+            base_dir: None,
             broker: None,
             buffer_size: 4192,
             exchange: "xpublic".to_string(),
@@ -985,6 +987,7 @@ impl Config {
                 .unwrap_or_else(|| topic_prefix.get(0).cloned().unwrap_or_else(|| "v03".to_string()));
 
             let mut publ = Publisher::new(Some(cred), exchanges, topic_prefix, format);
+            log::error!("parse_publisher: post_base_dir:: {:?}", self.post_base_dir);
             publ.base_dir = self.post_base_dir.clone();
             publ.base_url = self.post_base_url.clone();
 
@@ -1170,6 +1173,10 @@ impl Config {
 
             if (self.nodupe_ttl as f64) < self.file_age_max {
                 log::warn!("nodupe_ttl < fileAgeMax means some files could age out of the cache and be re-ingested ( see : https://github.com/MetPX/sarracenia/issues/904 )");
+            }
+        } else if self.component == "sender" {
+            if self.post_base_url.is_none() {
+                self.post_base_url = self.send_to.clone();
             }
         }
 
