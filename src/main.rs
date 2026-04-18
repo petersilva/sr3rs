@@ -947,20 +947,20 @@ async fn main() -> Result<()> {
 
             // Serve the 'dist' directory for static files (Wasm, HTML, JS)
             let serve_dir = tower_http::services::ServeDir::new("dist")
-                .fallback(tower_http::services::ServeFile::new("dist/index.html"));
+            .fallback(tower_http::services::ServeFile::new("dist/index.html"));
 
             let app = Router::new()
-                .route("/api/configs", get(list_configs))
-                .route("/api/read", get(read_file))
-                .route("/api/write", post(write_file))
-                .fallback_service(serve_dir)
-                .layer(CorsLayer::permissive());
+            .route("/api/configs", get(list_configs))
+            .route("/api/read", get(read_file))
+            .route("/api/write", post(write_file))
+            .route("/api/positions", get(get_positions).post(post_positions))
+            .fallback_service(serve_dir)
+            .layer(CorsLayer::permissive());
 
             let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
             axum::serve(listener, app).await?;
-        }
-        Commands::Post { config_patterns, files } => {
-            setup_logging(log_level, None)?;
+            }
+            Commands::Post { config_patterns, files } => {            setup_logging(log_level, None)?;
 
             log::warn!("config: {:?}  files: {:?} ", config_patterns, files);
 
@@ -1095,4 +1095,14 @@ async fn read_file(Query(params): Query<FilePath>) -> Result<String, (axum::http
 async fn write_file(Query(params): Query<FilePath>, body: String) -> Result<(), (axum::http::StatusCode, String)> {
     let backend = NativeBackend;
     backend.write_file(&params.path, &body).await.map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))
+}
+
+async fn get_positions() -> Json<std::collections::HashMap<String, (f32, f32)>> {
+    let backend = NativeBackend;
+    Json(backend.load_positions().await)
+}
+
+async fn post_positions(axum::extract::Json(positions): axum::extract::Json<std::collections::HashMap<String, (f32, f32)>>) -> Result<(), (axum::http::StatusCode, String)> {
+    let backend = NativeBackend;
+    backend.save_positions(positions).await.map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))
 }

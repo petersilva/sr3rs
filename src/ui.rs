@@ -28,6 +28,8 @@ pub trait IoBackend {
     async fn load_configs(&self) -> Vec<ConfigInfo>;
     async fn read_file(&self, path: &str) -> Result<String, String>;
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String>;
+    async fn load_positions(&self) -> HashMap<String, (f32, f32)>;
+    async fn save_positions(&self, positions: HashMap<String, (f32, f32)>) -> Result<(), String>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -62,6 +64,23 @@ impl IoBackend for NativeBackend {
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
         std::fs::write(path, content).map_err(|e| e.to_string())
+    }
+
+    async fn load_positions(&self) -> HashMap<String, (f32, f32)> {
+        let path = crate::config::paths::get_user_config_dir().join("ui").join("node_positions.json");
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            serde_json::from_str(&data).unwrap_or_default()
+        } else {
+            HashMap::new()
+        }
+    }
+
+    async fn save_positions(&self, positions: HashMap<String, (f32, f32)>) -> Result<(), String> {
+        let dir = crate::config::paths::get_user_config_dir().join("ui");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join("node_positions.json");
+        let data = serde_json::to_string_pretty(&positions).map_err(|e| e.to_string())?;
+        std::fs::write(path, data).map_err(|e| e.to_string())
     }
 }
 
@@ -108,6 +127,23 @@ impl IoBackend for WebBackend {
         let url = format!("{}/api/write?path={}", self.base_url, urlencoding::encode(path));
         let client = reqwest::Client::new();
         match client.post(&url).body(content.to_string()).send().await {
+            Ok(resp) => if resp.status().is_success() { Ok(()) } else { Err(format!("Server error: {}", resp.status())) },
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    async fn load_positions(&self) -> HashMap<String, (f32, f32)> {
+        let url = format!("{}/api/positions", self.base_url);
+        match reqwest::get(&url).await {
+            Ok(resp) => resp.json().await.unwrap_or_default(),
+            Err(_) => HashMap::new(),
+        }
+    }
+
+    async fn save_positions(&self, positions: HashMap<String, (f32, f32)>) -> Result<(), String> {
+        let url = format!("{}/api/positions", self.base_url);
+        let client = reqwest::Client::new();
+        match client.post(&url).json(&positions).send().await {
             Ok(resp) => if resp.status().is_success() { Ok(()) } else { Err(format!("Server error: {}", resp.status())) },
             Err(e) => Err(e.to_string()),
         }
@@ -170,7 +206,7 @@ impl MyApp {
         // For simplicity in this turn, we'll let the binary handle the initial load.
     }
     
-    pub fn build_graph(&mut self, config_infos: Vec<ConfigInfo>) {
+    pub fn build_graph(&mut self, config_infos: Vec<ConfigInfo>, positions: HashMap<String, (f32, f32)>) {
         self.nodes.clear();
         self.edges.clear();
         let mut exchange_to_nodes: HashMap<String, Vec<usize>> = HashMap::new();
@@ -186,9 +222,15 @@ impl MyApp {
 
             exchange_to_nodes.entry(info.exchange.clone()).or_default().push(i);
 
+            let pos = if let Some(&(x, y)) = positions.get(&info.name) {
+                egui::pos2(x, y)
+            } else {
+                egui::pos2(100.0 + (i as f32 * 150.0) % 800.0, 100.0 + (i as f32 * 150.0 / 800.0).floor() * 150.0)
+            };
+
             self.nodes.push(Node {
                 info,
-                pos: egui::pos2(100.0 + (i as f32 * 150.0) % 800.0, 100.0 + (i as f32 * 150.0 / 800.0).floor() * 150.0),
+                pos,
                 color,
             });
         }
@@ -230,6 +272,8 @@ impl eframe::App for MyApp {
                 }
             }
         }
+
+        let mut save_layout = false;
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -307,6 +351,10 @@ impl eframe::App for MyApp {
                     node.pos += node_resp.drag_delta() / self.zoom;
                 }
                 
+                if node_resp.drag_stopped() {
+                    save_layout = true;
+                }
+                
                 if node_resp.clicked() {
                     let _path = node.info.file_path.clone();
                     let _backend = self.backend.clone();
@@ -367,6 +415,26 @@ impl eframe::App for MyApp {
                 }
             }
         });
+
+        if save_layout {
+            let mut positions = HashMap::new();
+            for node in &self.nodes {
+                positions.insert(node.info.name.clone(), (node.pos.x, node.pos.y));
+            }
+            let _backend = self.backend.clone();
+            
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = pollster::block_on(_backend.save_positions(positions));
+            }
+            
+            #[cfg(target_arch = "wasm32")]
+            {
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = _backend.save_positions(positions).await;
+                });
+            }
+        }
 
         if let Some(path) = &self.editing_path.clone() {
             let mut is_open = true;

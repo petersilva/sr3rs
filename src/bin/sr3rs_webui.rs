@@ -21,13 +21,14 @@ fn main() {
         });
         
         let config_infos = backend.load_configs().await;
+        let positions = backend.load_positions().await;
 
         eframe::WebRunner::new().start(
             "main_canvas",
             eframe::WebOptions::default(),
             Box::new(move |_cc| {
                 let mut app = MyApp::new(backend);
-                app.build_graph(config_infos);
+                app.build_graph(config_infos, positions);
                 Box::new(app)
             }),
         )
