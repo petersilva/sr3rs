@@ -15,6 +15,7 @@ struct Node {
     post_exchanges: Vec<String>,
     pos: egui::Pos2,
     color: egui::Color32,
+    file_path: String,
 }
 
 struct MyApp {
@@ -22,6 +23,9 @@ struct MyApp {
     edges: Vec<(usize, usize)>,
     zoom: f32,
     offset: egui::Vec2,
+    editing_path: Option<String>,
+    editing_content: String,
+    save_status: Option<String>,
 }
 
 impl MyApp {
@@ -55,6 +59,7 @@ impl MyApp {
                     post_exchanges,
                     pos: egui::pos2(100.0 + (i as f32 * 150.0) % 800.0, 100.0 + (i as f32 * 150.0 / 800.0).floor() * 150.0),
                     color,
+                    file_path: config_file.clone(),
                 });
                 
                 exchange_to_nodes.entry(exchange).or_default().push(i);
@@ -78,6 +83,9 @@ impl MyApp {
             edges,
             zoom: 1.0,
             offset: egui::Vec2::ZERO,
+            editing_path: None,
+            editing_content: String::new(),
+            save_status: None,
         }
     }
 }
@@ -133,10 +141,21 @@ impl eframe::App for MyApp {
                 
                 let node_id = ui.id().with(&node.name);
                 let rect = egui::Rect::from_center_size(screen_pos, egui::vec2(radius * 2.0, radius * 2.0));
-                let node_resp = ui.interact(rect, node_id, egui::Sense::drag());
+                let node_resp = ui.interact(rect, node_id, egui::Sense::click_and_drag());
                 
                 if node_resp.dragged() {
                     node.pos += node_resp.drag_delta() / self.zoom;
+                }
+                
+                if node_resp.clicked() {
+                    if let Ok(content) = std::fs::read_to_string(&node.file_path) {
+                        self.editing_content = content;
+                        self.editing_path = Some(node.file_path.clone());
+                        self.save_status = None;
+                    } else {
+                        self.save_status = Some("Failed to read file".to_string());
+                        self.editing_path = Some(node.file_path.clone());
+                    }
                 }
 
                 painter.circle_filled(screen_pos, radius, node.color);
@@ -169,6 +188,42 @@ impl eframe::App for MyApp {
                 }
             }
         });
+
+        if let Some(path) = &self.editing_path.clone() {
+            let mut is_open = true;
+            egui::Window::new(format!("Editing: {}", path))
+                .open(&mut is_open)
+                .resizable(true)
+                .default_size([600.0, 400.0])
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            if let Err(e) = std::fs::write(path, &self.editing_content) {
+                                self.save_status = Some(format!("Error saving: {}", e));
+                            } else {
+                                self.save_status = Some("Saved successfully!".to_string());
+                            }
+                        }
+                        if ui.button("Close").clicked() {
+                            self.editing_path = None;
+                        }
+                        if let Some(status) = &self.save_status {
+                            ui.label(status);
+                        }
+                    });
+                    ui.separator();
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.add(egui::TextEdit::multiline(&mut self.editing_content)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(f32::INFINITY)
+                        );
+                    });
+                });
+                
+            if !is_open {
+                self.editing_path = None;
+            }
+        }
     }
 }
 
