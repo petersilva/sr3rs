@@ -1101,17 +1101,25 @@ impl Config {
             return true;
         }
 
-        match get_if_addrs::get_if_addrs() {
-            Ok(ifaces) => {
-                for iface in ifaces {
-                    let addr = iface.addr.ip().to_string();
-                    if self.vip.contains(&addr) {
-                        return true;
+        #[cfg(target_arch = "wasm32")]
+        {
+            return true;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            match get_if_addrs::get_if_addrs() {
+                Ok(ifaces) => {
+                    for iface in ifaces {
+                        let addr = iface.addr.ip().to_string();
+                        if self.vip.contains(&addr) {
+                            return true;
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                log::error!("CONFIG: error getting network interfaces: {}", e);
+                Err(e) => {
+                    log::error!("CONFIG: error getting network interfaces: {}", e);
+                }
             }
         }
         false

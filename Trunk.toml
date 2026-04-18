@@ -1,0 +1,11 @@
+[build]
+target = "webui.html"
+dist = "dist"
+filehash = true
+
+[[bin]]
+name = "sr3rs_webui"
+
+[serve]
+port = 8080
+rewrite_base = "/"

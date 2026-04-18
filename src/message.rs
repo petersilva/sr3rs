@@ -46,6 +46,7 @@ impl Message {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &std::path::Path, config: &crate::Config, base_dir: &std::path::Path) -> anyhow::Result<Self> {
         let abs_path = std::fs::canonicalize(path).map_err(|e| anyhow::anyhow!("Failed to canonicalize path {:?}: {}", path, e))?;
         let metadata = std::fs::metadata(&abs_path)?;

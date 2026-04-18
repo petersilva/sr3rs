@@ -12,6 +12,13 @@ use sr3rs::utils::{setup_logging, detect_component, resolve_patterns, is_process
 use anyhow::Result;
 use std::io::Write;
 use std::process::Command;
+use axum::{
+    routing::{get, post},
+    extract::Query,
+    Json, Router,
+};
+use tower_http::cors::CorsLayer;
+use sr3rs::ui::{ConfigInfo, NativeBackend, IoBackend};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -103,6 +110,13 @@ enum Commands {
     },
     /// Visualize data flows between configurations
     View,
+    /// Run a web-based UI for visualization and editing
+    #[command(name = "webui")]
+    WebUi {
+        /// Port to run the web server on
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+    },
     /// Post/Announce specific files
     Post {
         /// Path or pattern to the configuration file(s)
@@ -926,6 +940,25 @@ async fn main() -> Result<()> {
                 .spawn()?
                 .wait()?;
         }
+        Commands::WebUi { port } => {
+            setup_logging(log_level, None)?;
+            log::info!("Starting Web UI server on port {}", port);
+            log::info!("Open http://localhost:{} in your browser", port);
+
+            // Serve the 'dist' directory for static files (Wasm, HTML, JS)
+            let serve_dir = tower_http::services::ServeDir::new("dist")
+                .fallback(tower_http::services::ServeFile::new("dist/index.html"));
+
+            let app = Router::new()
+                .route("/api/configs", get(list_configs))
+                .route("/api/read", get(read_file))
+                .route("/api/write", post(write_file))
+                .fallback_service(serve_dir)
+                .layer(CorsLayer::permissive());
+
+            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+            axum::serve(listener, app).await?;
+        }
         Commands::Post { config_patterns, files } => {
             setup_logging(log_level, None)?;
 
@@ -1042,4 +1075,24 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct FilePath {
+    path: String,
+}
+
+async fn list_configs() -> Json<Vec<ConfigInfo>> {
+    let backend = NativeBackend;
+    Json(backend.load_configs().await)
+}
+
+async fn read_file(Query(params): Query<FilePath>) -> Result<String, (axum::http::StatusCode, String)> {
+    let backend = NativeBackend;
+    backend.read_file(&params.path).await.map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))
+}
+
+async fn write_file(Query(params): Query<FilePath>, body: String) -> Result<(), (axum::http::StatusCode, String)> {
+    let backend = NativeBackend;
+    backend.write_file(&params.path, &body).await.map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))
 }
