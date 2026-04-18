@@ -986,6 +986,11 @@ impl Config {
             let format = self.post_format.clone()
                 .unwrap_or_else(|| topic_prefix.get(0).cloned().unwrap_or_else(|| "v03".to_string()));
 
+            if self.component == "sender" {
+                if self.post_base_url.is_none() {
+                    self.post_base_url = self.send_to.clone();
+                }
+            }
             let mut publ = Publisher::new(Some(cred), exchanges, topic_prefix, format);
             log::error!("parse_publisher: post_base_dir:: {:?}", self.post_base_dir);
             publ.base_dir = self.post_base_dir.clone();
@@ -1177,6 +1182,13 @@ impl Config {
         } else if self.component == "sender" {
             if self.post_base_url.is_none() {
                 self.post_base_url = self.send_to.clone();
+            }
+            if self.post_base_dir.clone().unwrap().to_str() == Some(".") {
+                self.post_base_dir = std::env::home_dir().map(|home| {
+                    home.strip_prefix(Path::new("/"))
+                        .unwrap_or(&home)
+                        .to_path_buf()
+                });
             }
         }
 
