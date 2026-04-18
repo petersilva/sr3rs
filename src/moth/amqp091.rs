@@ -58,7 +58,7 @@ impl Moth for Amqp091 {
     }
 
     async fn subscribe(&mut self, topics: &[String], exchange: &str, queue_name: &str) -> Result<()> {
-        log::debug!("MOTH: AMQP 0.9.1 subscribing to topics {:?} on exchange {} with queue {}", topics, exchange, queue_name);
+        log::info!("MOTH: AMQP 0.9.1 subscribing to topics {:?} on exchange {} with queue {}", topics, exchange, queue_name);
         
         // DO NOT automatically declare exchange here.
         // Subscribers often have bind permissions but not declare permissions for public exchanges.
@@ -189,9 +189,9 @@ impl Moth for Amqp091 {
             
             let safe_topic = derived_topic.replace("#", "%23").replace("*", "%22");
             
-            log::debug!("MOTH: AMQP 0.9.1 publish 1: topic {:?}  exchang: {:?}", safe_topic, exchange );
-            log::debug!("MOTH: AMQP 0.9.1 publish 2: headers {:?} ", headers );
-            log::debug!("MOTH: AMQP 0.9.1 publish 3: body {:?} ", raw_body );
+            log::info!("moth/amqp091 publish 1: topic {:?}  exchange: {:?}", safe_topic, exchange );
+            log::info!("moth/amqp091 publish 2: headers {:?} ", headers );
+            log::info!("moth/amqp091 publish 3: body {:?} ", raw_body );
 
             // Python's behavior replaces '*' and '#' in the routing_key (topic).
             self.channel.basic_publish(

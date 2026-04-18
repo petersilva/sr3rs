@@ -207,7 +207,7 @@ pub trait Flow: Send + Sync {
     }
 
     async fn accept(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { 
-        ::log::warn!("AcCepting!? " );
+        ::log::info!("AcCepting!? " );
         Ok(()) 
     }
     
@@ -297,10 +297,10 @@ pub trait Flow: Send + Sync {
 
     fn message_adjust_post(&self, m: &mut Message, p: &crate::config::publisher::Publisher ) {
 
-        ::log::warn!("message_adjust_post START" );
-        ::log::warn!("message_adjust_post publisher p: {:?}", p );
+        ::log::info!("message_adjust_post START" );
+        ::log::info!("message_adjust_post publisher p: {:?}", p );
 
-        ::log::warn!("message_adjust_post new_dir: {:?} new_file: {:?}",  m.delete_on_post.get("new_dir").unwrap(), m.delete_on_post.get("new_file").unwrap() );
+        ::log::info!("message_adjust_post new_dir: {:?} new_file: {:?}",  m.delete_on_post.get("new_dir").unwrap(), m.delete_on_post.get("new_file").unwrap() );
 
         let new_dir = match m.delete_on_post.get("new_dir") {
                 Some(v) => v,
@@ -320,8 +320,8 @@ pub trait Flow: Send + Sync {
 
         let new_full_path = PathBuf::from(new_dir).join(new_file);
 
-        ::log::warn!("message_adjust_post new_full_path: {:?}", new_full_path );
-        ::log::warn!("message_adjust_post post_base_url: {:?}, post_base_dir: {:?}", p.base_url, p.base_dir );
+        ::log::info!("message_adjust_post new_full_path: {:?}", new_full_path );
+        ::log::info!("message_adjust_post post_base_url: {:?}, post_base_dir: {:?}", p.base_url, p.base_dir );
 
 
         if let Some(base_dir) = &p.base_dir {
@@ -330,7 +330,7 @@ pub trait Flow: Send + Sync {
                     m.rel_path = new_rel_path.to_string_lossy().into_owned();
                 }
                 Err(_) => {
-                    ::log::warn!("strip_prefix failed");
+                   ::log::warn!("strip_prefix failed");
                 }
             }
         }
@@ -342,8 +342,8 @@ pub trait Flow: Send + Sync {
         }
 
         // deferred: convert to windows backslashes in path.
-        ::log::warn!("message_adjust_post new_rel_path: {:?}", m.rel_path );
-        ::log::warn!("message_adjust_post END" );
+        ::log::info!("message_adjust_post new_rel_path: {:?}", m.rel_path );
+        ::log::info!("message_adjust_post END" );
     }
 
     async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
@@ -366,7 +366,7 @@ pub trait Flow: Send + Sync {
 
         for mut m in worklist.ok.drain(..) {
 
-            ::log::warn!( "posting message: {:?}", m);
+            ::log::info!( "posting message: {:?}", m);
             let mut failed_indices = Vec::new();
             for (idx, pub_mutex) in publishers.iter().enumerate() {
                 self.message_adjust_post( &mut m, &self.config().publishers[idx] );
@@ -411,7 +411,7 @@ pub trait Flow: Send + Sync {
             m.delete_on_post.insert("old_base_url".to_string(), m.base_url.clone() );
 
             m.base_url = m.delete_on_post.get("new_base_url").clone().unwrap().to_string();  
-            ::log::warn!("adjusting new_base_url: {:?}", m.base_url );
+            ::log::info!("adjusting new_base_url: {:?}", m.base_url );
         }
 
         if m.delete_on_post.contains_key("new_rel_path") {
@@ -420,7 +420,7 @@ pub trait Flow: Send + Sync {
             m.delete_on_post.insert("old_rel_path".to_string(), m.rel_path.clone() );
 
             m.rel_path = m.delete_on_post.get("new_rel_path").clone().unwrap().to_string();  
-            ::log::warn!("adjusting new_rel_path: {:?}", m.rel_path );
+            ::log::info!("adjusting new_rel_path: {:?}", m.rel_path );
         }
 
     }
@@ -526,11 +526,18 @@ pub trait Flow: Send + Sync {
                     self.shutdown().await?;
                     break;
                 }
+        
                 res = self.run_once(&mut worklist) => {
                     let count = res?;
                     total_messages += count;
+        
+                    // Stop if message limit reached
                     if message_count_max > 0 && total_messages >= message_count_max {
-                        ::log::info!("{} messages processed >= messageCountMax {}. Shutting down...", total_messages, message_count_max);
+                        ::log::info!(
+                            "{} messages processed >= messageCountMax {}. Shutting down...",
+                            total_messages,
+                            message_count_max
+                        );
                         self.housekeeping().await?;
                         for cb_mutex in self.callbacks() {
                             let mut cb = cb_mutex.lock().await;
@@ -539,31 +546,36 @@ pub trait Flow: Send + Sync {
                         self.shutdown().await?;
                         break;
                     }
+        
+                    // idle detection 
+                    if count == 0 {
+                        tokio::select! {
+                            _ = token.cancelled() => {
+                                ::log::info!("Shutdown requested during sleep. Finalizing...");
+                                self.housekeeping().await?;
+                                for cb_mutex in self.callbacks() {
+                                    let mut cb = cb_mutex.lock().await;
+                                    cb.on_stop().await?;
+                                }
+                                self.shutdown().await?;
+                                return Ok(());
+                            }
+        
+                            _ = tokio::time::sleep(
+                                tokio::time::Duration::from_secs_f64(self.config().sleep)
+                            ) => {}
+                        }
+                    }
                 }
             }
-            
+        
+            // Periodic housekeeping (unchanged)
             if last_housekeeping.elapsed() >= housekeeping_interval {
                 self.housekeeping().await?;
                 last_housekeeping = std::time::Instant::now();
             }
-
-            if worklist.incoming.is_empty() && worklist.ok.is_empty() {
-                tokio::select! {
-                    _ = token.cancelled() => {
-                        ::log::info!("Shutdown requested during sleep. Finalizing...");
-                        self.housekeeping().await?;
-                        for cb_mutex in self.callbacks() {
-                            let mut cb = cb_mutex.lock().await;
-                            cb.on_stop().await?;
-                        }
-                        self.shutdown().await?;
-                        return Ok(());
-                    }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs_f64(self.config().sleep)) => {}
-                }
-            }
         }
-        Ok(())
+      Ok(())
     }
 
     async fn housekeeping(&self) -> anyhow::Result<()> {
