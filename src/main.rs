@@ -101,6 +101,8 @@ enum Commands {
         /// Path or pattern to the configuration file(s)
         config_patterns: Vec<String>,
     },
+    /// Visualize data flows between configurations
+    View,
     /// Post/Announce specific files
     Post {
         /// Path or pattern to the configuration file(s)
@@ -909,6 +911,20 @@ async fn main() -> Result<()> {
                 }
                 let _ = flow.shutdown().await;
             }
+        }
+        Commands::View => {
+            // Find the sr3rs_ui binary. It should be in the same directory as the current executable.
+            let current_exe = std::env::current_exe()?;
+            let ui_exe = current_exe.with_file_name("sr3rs_ui");
+            
+            if !ui_exe.exists() {
+                anyhow::bail!("sr3rs_ui binary not found at {}. Please build it with 'cargo build --bin sr3rs_ui'", ui_exe.display());
+            }
+
+            log::info!("Starting UI: {}", ui_exe.display());
+            Command::new(ui_exe)
+                .spawn()?
+                .wait()?;
         }
         Commands::Post { config_patterns, files } => {
             setup_logging(log_level, None)?;

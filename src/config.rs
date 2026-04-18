@@ -1002,7 +1002,7 @@ impl Config {
         }
     }
 
-    fn resolve_post_exchanges(&self) -> Vec<String> {
+    pub fn resolve_post_exchanges(&self) -> Vec<String> {
         let mut exchange_root = self.post_exchange.clone()
             .unwrap_or_else(|| {
                 if let Some(broker) = &self.post_broker {
@@ -1033,7 +1033,7 @@ impl Config {
         }
     }
 
-    fn resolve_exchange(&self) -> String {
+    pub fn resolve_exchange(&self) -> String {
         if self.exchange != "xpublic" && self.exchange != "default" {
             return self.exchange.clone();
         }
