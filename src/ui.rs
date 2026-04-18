@@ -276,10 +276,31 @@ impl eframe::App for MyApp {
             // Draw nodes
             for node in &mut self.nodes {
                 let screen_pos = to_screen(node.pos);
-                let radius = 40.0 * self.zoom;
+                
+                let font_id_name = egui::FontId::proportional(14.0 * self.zoom);
+                let font_id_comp = egui::FontId::proportional(10.0 * self.zoom);
+                
+                let name_galley = painter.layout_no_wrap(
+                    node.info.name.clone(),
+                    font_id_name.clone(),
+                    egui::Color32::BLACK,
+                );
+                
+                let comp_galley = painter.layout_no_wrap(
+                    node.info.component.clone(),
+                    font_id_comp.clone(),
+                    egui::Color32::from_gray(50),
+                );
+                
+                let padding = egui::vec2(15.0 * self.zoom, 10.0 * self.zoom);
+                let text_width = name_galley.size().x.max(comp_galley.size().x);
+                let text_height = name_galley.size().y + comp_galley.size().y + (5.0 * self.zoom);
+                
+                let rect_size = egui::vec2(text_width, text_height) + padding * 2.0;
+                let rect = egui::Rect::from_center_size(screen_pos, rect_size);
+                let rounding = 5.0 * self.zoom;
                 
                 let node_id = ui.id().with(&node.info.name);
-                let rect = egui::Rect::from_center_size(screen_pos, egui::vec2(radius * 2.0, radius * 2.0));
                 let node_resp = ui.interact(rect, node_id, egui::Sense::click_and_drag());
                 
                 if node_resp.dragged() {
@@ -287,14 +308,14 @@ impl eframe::App for MyApp {
                 }
                 
                 if node_resp.clicked() {
-                    let path = node.info.file_path.clone();
-                    let backend = self.backend.clone();
+                    let _path = node.info.file_path.clone();
+                    let _backend = self.backend.clone();
                     
                     #[cfg(not(target_arch = "wasm32"))]
                     {
-                        if let Ok(content) = pollster::block_on(backend.read_file(&path)) {
+                        if let Ok(content) = pollster::block_on(_backend.read_file(&_path)) {
                             self.editing_content = content;
-                            self.editing_path = Some(path);
+                            self.editing_path = Some(_path);
                             self.save_status = None;
                         }
                     }
@@ -305,33 +326,35 @@ impl eframe::App for MyApp {
                         let loader = self.async_load_result.clone();
                         let ctx_clone = ctx.clone();
                         wasm_bindgen_futures::spawn_local(async move {
-                            let res = backend.read_file(&path).await;
+                            let res = _backend.read_file(&_path).await;
                             if let Ok(mut guard) = loader.lock() {
-                                *guard = Some(res.map(|c| (path, c)));
+                                *guard = Some(res.map(|c| (_path, c)));
                             }
                             ctx_clone.request_repaint();
                         });
                     }
                 }
 
-                painter.circle_filled(screen_pos, radius, node.color);
+                painter.rect_filled(rect, rounding, node.color);
                 if node_resp.hovered() {
-                    painter.circle_stroke(screen_pos, radius + 2.0, egui::Stroke::new(2.0, egui::Color32::WHITE));
+                    painter.rect_stroke(rect.expand(2.0 * self.zoom), rounding + 2.0 * self.zoom, egui::Stroke::new(2.0 * self.zoom, egui::Color32::WHITE));
+                } else {
+                    painter.rect_stroke(rect, rounding, egui::Stroke::new(1.0 * self.zoom, egui::Color32::from_gray(100)));
                 }
 
                 painter.text(
-                    screen_pos,
+                    screen_pos - egui::vec2(0.0, comp_galley.size().y / 2.0 + (2.0 * self.zoom)),
                     egui::Align2::CENTER_CENTER,
                     &node.info.name,
-                    egui::FontId::proportional(14.0 * self.zoom),
+                    font_id_name,
                     egui::Color32::BLACK,
                 );
 
                 painter.text(
-                    screen_pos + egui::vec2(0.0, 15.0 * self.zoom),
+                    screen_pos + egui::vec2(0.0, name_galley.size().y / 2.0 + (2.0 * self.zoom)),
                     egui::Align2::CENTER_CENTER,
                     &node.info.component,
-                    egui::FontId::proportional(10.0 * self.zoom),
+                    font_id_comp,
                     egui::Color32::from_gray(50),
                 );
                 
