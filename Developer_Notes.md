@@ -12,9 +12,37 @@
 
 
 
+## Choices
+
+
+### Using Pathbufs and Paths instead of Strings
+
+When referring to hierarchical file system paths, the python implementation, in order to 
+support windows (whose / is backwards), used strings instead of paths throughout. 
+The Rust implementation started the same way, but there is a goal of moving all file paths 
+to using std::path( Path, PathBuf ); over time. Not there yet.
+
+
+### Improved path mangling Strategy
+
+The Python implementation has a number of inscrutable routines:  updatePaths, updateFieldsAccepted,
+and some initially straightforward strategies, that actually make things harder to understand.
+For example, when you gather in python, it uses the post_base_url etc... directly.  This is confusing
+because other components do it much later.  It is especially confusing with multiple publishers.
+
+The Rust implementation is using the same path mangling strategy for all components,
+and the *gather_file* output will always have a file:<something> base_url.  then it goes
+through filtering, and work, and post... and in the post phase, ther post_ attributes get 
+applied. So now there are two routines:
+
+  * message_adjust_filter -- determines where the file will be written to: new_dir and new_file.
+
+  * message_adjust_post -- applies post_ settings, per publisher.
 
 
 ## Incompatibilities
+
+
 
 ### DeleteOnPost
 
