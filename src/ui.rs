@@ -14,12 +14,20 @@ pub struct ConfigInfo {
     pub exchange: String,
     pub post_exchanges: Vec<String>,
     pub file_path: String,
+    pub subtopics: Vec<String>,
 }
 
 pub struct Node {
     pub info: ConfigInfo,
     pub pos: egui::Pos2,
     pub color: egui::Color32,
+}
+
+pub struct Edge {
+    pub start_idx: usize,
+    pub end_idx: usize,
+    pub post_exchange: String,
+    pub subtopics: Vec<String>,
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
@@ -48,10 +56,30 @@ impl IoBackend for NativeBackend {
             if config.load(&config_file).is_ok() && config.finalize().is_ok() {
                 results.push(ConfigInfo {
                     name: config.configname.clone().unwrap_or_else(|| "unknown".to_string()),
-                    component,
+                    component: component.clone(),
                     exchange: config.resolve_exchange(),
                     post_exchanges: config.resolve_post_exchanges(),
                     file_path: config_file,
+                    subtopics: {
+                        let mut t: Vec<String> = config.subscriptions.iter().flat_map(|s| s.bindings.iter().map(|b| b.topic.clone())).collect();
+                        if t.is_empty() {
+                            if !config.topic_prefix.is_empty() {
+                                let mut parts = config.topic_prefix.clone();
+                                parts.push("#".to_string());
+                                t.push(parts.join("."));
+                            } else if !config.subtopics.is_empty() {
+                                t.extend(config.subtopics.clone());
+                            } else {
+                                t.push("#".to_string());
+                            }
+                        }
+                        
+                        match component.as_str() {
+                            "sender" | "post" | "cpost" | "cpump" => t.clear(),
+                            _ => {}
+                        }
+                        t
+                    },
                 });
             }
         }
@@ -154,7 +182,7 @@ use std::sync::Arc;
 
 pub struct MyApp {
     pub nodes: Vec<Node>,
-    pub edges: Vec<(usize, usize)>,
+    pub edges: Vec<Edge>,
     pub zoom: f32,
     pub offset: egui::Vec2,
     pub editing_path: Option<String>,
@@ -239,7 +267,12 @@ impl MyApp {
             for post_ex in &node.info.post_exchanges {
                 if let Some(target_indices) = exchange_to_nodes.get(post_ex) {
                     for &target_idx in target_indices {
-                        self.edges.push((idx, target_idx));
+                        self.edges.push(Edge {
+                            start_idx: idx,
+                            end_idx: target_idx,
+                            post_exchange: post_ex.clone(),
+                            subtopics: self.nodes[target_idx].info.subtopics.clone(),
+                        });
                     }
                 }
             }
@@ -303,18 +336,11 @@ impl eframe::App for MyApp {
                 (pos.to_vec2() * self.zoom + self.offset).to_pos2()
             };
 
-            // Draw edges
-            for &(start_idx, end_idx) in &self.edges {
-                let start = to_screen(self.nodes[start_idx].pos);
-                let end = to_screen(self.nodes[end_idx].pos);
+            // Draw edges (lines only)
+            for edge in &self.edges {
+                let start = to_screen(self.nodes[edge.start_idx].pos);
+                let end = to_screen(self.nodes[edge.end_idx].pos);
                 painter.line_segment([start, end], egui::Stroke::new(2.0 * self.zoom, egui::Color32::from_gray(200)));
-                
-                // Draw arrow head
-                let dir = (end - start).normalized();
-                let arrow_len = 10.0 * self.zoom;
-                let side = egui::vec2(-dir.y, dir.x) * arrow_len * 0.5;
-                painter.line_segment([end, end - dir * arrow_len + side], egui::Stroke::new(2.0 * self.zoom, egui::Color32::from_gray(200)));
-                painter.line_segment([end, end - dir * arrow_len - side], egui::Stroke::new(2.0 * self.zoom, egui::Color32::from_gray(200)));
             }
 
             // Draw nodes
@@ -412,6 +438,62 @@ impl eframe::App for MyApp {
                         ui.label(format!("Exchange: {}", node.info.exchange));
                         ui.label(format!("Posts to: {:?}", node.info.post_exchanges));
                     });
+                }
+            }
+            
+            // Draw edge labels and arrows (on top of nodes)
+            for edge in &self.edges {
+                let start = to_screen(self.nodes[edge.start_idx].pos);
+                let end = to_screen(self.nodes[edge.end_idx].pos);
+                if start != end {
+                    let dir = (end - start).normalized();
+                    
+                    // Draw labels
+                    let label_font = egui::FontId::proportional(11.0 * self.zoom);
+                    let up_offset = egui::vec2(0.0, -4.0 * self.zoom); // visually "above" the line on screen
+                    
+                    let (source_align, consumer_align) = if dir.x > 0.0 {
+                        (egui::Align2::LEFT_BOTTOM, egui::Align2::RIGHT_BOTTOM)
+                    } else {
+                        (egui::Align2::RIGHT_BOTTOM, egui::Align2::LEFT_BOTTOM)
+                    };
+                    
+                    // The label should start clearing the node bounding box.
+                    // A radius of 75-80 is typically enough to clear the dynamic rectangle width.
+                    let box_clearance = 75.0 * self.zoom;
+                    
+                    // Label at source: post_exchange
+                    painter.text(
+                        start + dir * box_clearance + up_offset,
+                        source_align,
+                        &edge.post_exchange,
+                        label_font.clone(),
+                        egui::Color32::BLACK,
+                    );
+
+                    // Label at consumer: subtopics
+                    if !edge.subtopics.is_empty() {
+                        let subtopics_text = edge.subtopics.join(", ");
+                        painter.text(
+                            end - dir * box_clearance + up_offset,
+                            consumer_align,
+                            subtopics_text,
+                            label_font,
+                            egui::Color32::BLACK,
+                        );
+                    }
+
+                    // Draw arrow head (solid triangle) at 60% along the line
+                    let tip = start + (end - start) * 0.6;
+                    let arrow_len = 15.0 * self.zoom;
+                    let base = tip - dir * arrow_len;
+                    let side = egui::vec2(-dir.y, dir.x) * (7.0 * self.zoom);
+                    
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![tip, base + side, base - side],
+                        egui::Color32::from_gray(150),
+                        egui::Stroke::NONE,
+                    ));
                 }
             }
         });
