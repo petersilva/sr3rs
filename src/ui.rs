@@ -327,7 +327,7 @@ impl eframe::App for MyApp {
             let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
 
             // Handle panning
-            if response.dragged() && ctx.dragged_id().is_none() {
+            if response.dragged() {
                  self.offset += response.drag_delta();
             }
 
