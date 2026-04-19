@@ -32,11 +32,18 @@ struct Cli {
     #[arg(long = "messageCountMax", global = true)]
     message_count_max: Option<usize>,
 
+    /// Override the default configuration directory
+    #[arg(long = "configDir", alias = "config_dir")]
+    config_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Some(config_dir) = cli.config_dir {
+        sr3rs::config::paths::set_config_dir_override(config_dir);
+    }
 
     let log_level = if cli.debug {
         log::LevelFilter::Debug

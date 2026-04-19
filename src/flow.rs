@@ -78,12 +78,12 @@ pub trait Flow: Send + Sync {
     /// to from which relative path trees would start.
 
     fn message_adjust_filter(&self, msg: &mut Message ) {
-        ::log::debug!("message_adjust_filter START" );
+        ::log::info!("message_adjust_filter START" );
         let mirror = msg.delete_on_post.get("_mirror").map(|s| s == "true").unwrap_or(false);
         let raw_dest_dir = msg.delete_on_post.get("_dest_dir").cloned().unwrap_or_else(|| ".".to_string());
         let config = self.config();
 
-        ::log::debug!(" raw_dest_dir: {:?} mirror: {:?}", raw_dest_dir, mirror);
+        ::log::info!(" raw_dest_dir: {:?} mirror: {:?} sendTo: {:?}", raw_dest_dir, mirror, config.send_to);
         let mut vars = config.options.clone();
         for (k, v) in &msg.fields {
             vars.insert(k.clone(), v.clone());
@@ -95,7 +95,7 @@ pub trait Flow: Send + Sync {
         let dest_dir = crate::config::variable_expansion::expand_variables(&raw_dest_dir, &vars);
         let mut rel_path = msg.rel_path.clone();
 
-        ::log::debug!("initial dest_dir: {:?} mirror: {:?}, rel_path: {:?}", dest_dir, mirror, rel_path);
+        ::log::info!("initial dest_dir: {:?} mirror: {:?}, rel_path: {:?}", dest_dir, mirror, rel_path);
 
         let new_rel_path = rel_path.strip_prefix(&dest_dir);
         if new_rel_path != None {
@@ -112,7 +112,7 @@ pub trait Flow: Send + Sync {
         let parts: Vec<&str> = rel_path.split('/').collect();
         let filename = parts.last().unwrap_or(&"");
 
-        ::log::debug!("2nd raw_dest_dir: {:?} mirror: {:?}, parts: {:?}, filename: {:?}", raw_dest_dir, mirror, parts, filename);
+        ::log::info!("2nd raw_dest_dir: {:?} mirror: {:?}, parts: {:?}, filename: {:?}", raw_dest_dir, mirror, parts, filename);
         if mirror && parts.len() > 1 {
             let dir_parts = format!("{}",parts[..parts.len() - 1].join("/"));
             if !new_dir.is_empty() && new_dir != "." {
@@ -128,15 +128,15 @@ pub trait Flow: Send + Sync {
         msg.delete_on_post.insert("new_file".to_string(), filename.to_string());
 
 
-        ::log::debug!(" new_dir: {:?}, filename: {:?}", new_dir, filename);
+        ::log::info!(" new_dir: {:?}, filename: {:?}", new_dir, filename);
 
         let new_full_path = if new_dir.is_empty() || new_dir == "." {
              filename.to_string()
         } else {
              format!("{}/{}", new_dir, filename)
         };
-        ::log::debug!(" post_base_dir: {:?}, new_full_path: {:?}", config.post_base_dir, new_full_path);
-        ::log::debug!("message_adjust_filter END" );
+        ::log::info!(" post_base_dir: {:?}, new_full_path: {:?}", config.post_base_dir, new_full_path);
+        ::log::info!("message_adjust_filter END" );
 
     }
 

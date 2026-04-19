@@ -34,6 +34,10 @@ struct Cli {
     #[arg(long, global = true)]
     debug: bool,
 
+    /// Override the default configuration directory
+    #[arg(long = "configDir", global = true, alias = "config_dir")]
+    config_dir: Option<PathBuf>,
+
     /// Confirm you want to do something dangerous (required when operating on multiple configs)
     #[arg(long = "dangerWillRobinson", global = true, default_value_t = 0)]
     danger_will_robinson: usize,
@@ -226,6 +230,10 @@ async fn declare_rabbitmq_user(admin_broker: &sr3rs::broker::Broker, username: &
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if let Some(ref config_dir) = cli.config_dir {
+        paths::set_config_dir_override(config_dir.clone());
+    }
+
     let log_level = if cli.debug {
         log::LevelFilter::Debug
     } else {
@@ -374,6 +382,7 @@ async fn main() -> Result<()> {
                     
                     if cli.debug { cmd.arg("--debug"); }
                     if let Some(ref ll) = cli.log_level { cmd.arg("--logLevel").arg(ll); }
+                    if let Some(ref cd) = cli.config_dir { cmd.arg("--configDir").arg(cd); }
 
                     cmd.stdout(std::process::Stdio::null());
                     cmd.stderr(std::process::Stdio::null());
@@ -940,8 +949,11 @@ async fn main() -> Result<()> {
             }
 
             log::info!("Starting UI: {}", ui_exe.display());
-            Command::new(ui_exe)
-                .spawn()?
+            let mut cmd = Command::new(ui_exe);
+            if let Some(ref cd) = cli.config_dir {
+                cmd.arg("--configDir").arg(cd);
+            }
+            cmd.spawn()?
                 .wait()?;
         }
         Commands::WebUi { port } => {

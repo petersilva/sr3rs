@@ -119,6 +119,9 @@ impl IoBackend for NativeBackend {
         let sr3rs_exe = current_exe.with_file_name("sr3rs");
         
         let mut cmd = std::process::Command::new(if sr3rs_exe.exists() { sr3rs_exe } else { current_exe });
+        if let Some(overridden) = crate::config::paths::get_config_dir_override() {
+            cmd.arg("--configDir").arg(overridden);
+        }
         cmd.arg(action).arg(target);
 
         let output = cmd.output().map_err(|e| e.to_string())?;
