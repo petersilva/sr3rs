@@ -176,7 +176,7 @@ impl Moth for Amqp091 {
     }
 
     async fn publish(&mut self, exchange: &str, topic: &str, msg: &Message, options: &serde_json::Value) -> Result<()> {
-        let version = msg.fields.get("_format").map(|s| s.as_str()).unwrap_or("v03");
+        let version = msg.delete_on_post.get("format").map(|s| s.as_str()).unwrap_or("v03");
         
         if let Some((raw_body, mut headers_map, content_type)) = crate::postformat::export_any(msg, version, options) {
             let derived_topic = headers_map.remove("topic").unwrap_or_else(|| topic.to_string());

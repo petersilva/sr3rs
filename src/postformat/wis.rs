@@ -36,7 +36,7 @@ impl PostFormat for Wis {
         _options: &serde_json::Value,
     ) -> Option<Message> {
         let mut msg = Message::new("http://fake/", "");
-        msg.fields.insert("_format".to_string(), "wis".to_string());
+        msg.delete_on_post.insert("format".to_string(), "wis".to_string());
         Some(msg)
     }
 

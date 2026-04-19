@@ -334,6 +334,7 @@ pub trait Flow: Send + Sync {
                 }
             }
         }
+        m.delete_on_post.insert("format".to_string(),p.format.clone());
         
         // deferred: presence of m.delete_on_post.get("post_url") as an override.
 
@@ -462,21 +463,6 @@ pub trait Flow: Send + Sync {
         self.filter(worklist).await?;
         self.accept(worklist).await?;
         self.work(worklist).await?;
-
-        // adjust message after action is done, but before 'after_work' so adjustment is possible.
-
-        /* I think message_adjust_work does nothing useful.
-        let mut next_ok = Vec::new();
-        for mut m in worklist.ok.drain(..) {
-            if config.publishers.len() <= 1 {
-                self.message_adjust_work( &mut m);
-                next_ok.push(m);
-            } else {
-                ::log::error!("multiple publisher feature deferred");
-            }
-        }
-        worklist.ok = next_ok;
-        */
 
         for cb_mutex in self.callbacks() {
             let cb = cb_mutex.lock().await;

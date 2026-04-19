@@ -62,7 +62,7 @@ impl PostFormat for V02 {
         let rel_path = parts[2];
 
         let mut msg = Message::new(&base_url, rel_path);
-        msg.fields.insert("_format".to_string(), "v02".to_string());
+        msg.delete_on_post.insert("format".to_string(), "v02".to_string());
         
         for (k, v) in headers {
             msg.fields.insert(k.clone(), v.clone());

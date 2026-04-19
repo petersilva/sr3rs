@@ -41,12 +41,9 @@ impl PostFormat for Swim {
         _options: &serde_json::Value,
     ) -> Option<Message> {
         let mut msg = Message::new("", "");
-        msg.fields.insert("_format".to_string(), "swim".to_string());
-        msg.fields.insert("local_offset".to_string(), "0".to_string());
+        msg.delete_on_post.insert("format".to_string(), "swim".to_string());
+        msg.delete_on_post.insert("local_offset".to_string(), "0".to_string());
         
-        let delete_on_post = vec!["local_offset"];
-        msg.fields.insert("_deleteOnPost".to_string(), serde_json::to_string(&delete_on_post).unwrap());
-
         if let Some(pubtime) = headers.get("properties.pubtime") {
             let clean_time = pubtime.replace("-", "").replace(":", "").replace("Z", ".00").replace("T", "");
             if let Some(dt) = Message::parse_v02_time(&clean_time) {

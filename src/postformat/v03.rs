@@ -41,7 +41,7 @@ impl PostFormat for V03 {
         };
 
         let mut msg = Message::new("", "");
-        msg.fields.insert("_format".to_string(), "v03".to_string());
+        msg.delete_on_post.insert("format".to_string(), "v03".to_string());
 
         if let Some(obj) = value.as_object() {
             for (k, v) in obj {
