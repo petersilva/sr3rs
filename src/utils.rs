@@ -164,3 +164,98 @@ pub fn redact_url(url_str: &str) -> String {
         url_str.to_string()
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_state(config_file: &str) -> String {
+    let comp = detect_component(config_file);
+    let mut config = crate::Config::new();
+    config.apply_component_defaults(&comp);
+
+    let config_loaded = config.load(config_file).is_ok();
+    let config_finalized = if config_loaded { config.finalize().is_ok() } else { false };
+
+    let config_name = if config_loaded {
+        config.configname.clone()
+    } else {
+        std::path::Path::new(config_file)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+    };
+
+    let mut running_count = 0;
+    let expected_count = if config_loaded { config.instances } else { 1 };
+
+    let mut state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
+    
+    if !config_loaded && !state_dir.exists() {
+        if let Ok(h) = hostname::get() {
+            let h_str = h.to_string_lossy().to_string();
+            let guessed_dir = paths::get_user_cache_dir(Some(&h_str)).join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
+            if guessed_dir.exists() {
+                state_dir = guessed_dir;
+                config.host_dir = Some(h_str);
+            }
+        }
+    }
+
+    let instances_requested_file = state_dir.join("instances_expected");
+
+    let instances_requested = if instances_requested_file.exists() {
+        std::fs::read_to_string(instances_requested_file).ok().and_then(|s| s.parse().ok()).unwrap_or(0)
+    } else {
+        0
+    };
+
+    for i in 1..=100 {
+        let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i);
+        if pid_file.exists() {
+            if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = pid_str.parse::<i32>() {
+                    if is_process_running(pid) {
+                        running_count += 1;
+                    }
+                }
+            }
+        } else if i > 10 && i > expected_count { 
+            break;
+        }
+    }
+
+    let state_exists = if state_dir.exists() {
+        std::fs::read_dir(&state_dir).map(|mut entries| entries.next().is_some()).unwrap_or(false)
+    } else {
+        false
+    };
+
+    let mut state = if state_dir.join("disabled").exists() {
+        "stop".to_string()
+    } else if instances_requested == 0 && running_count == 0 {
+        if comp == "post" || comp == "cpost" {
+            "inte".to_string()
+        } else if state_exists {
+            "stop".to_string()
+        } else {
+            "new".to_string()
+        }
+    } else if running_count == 0 {
+        if comp == "post" || comp == "cpost" {
+            "inte".to_string()
+        } else {
+            "stop".to_string()
+        }
+    } else if running_count < instances_requested {
+        "part".to_string()
+    } else {
+        "run".to_string()
+    };
+
+    if running_count > 0 && !config.vip.is_empty() && !config.has_vip() {
+        state = "wvip".to_string();
+    }
+
+    if !config_loaded || !config_finalized {
+        state = format!("{} (ERR)", state);
+    }
+    
+    state
+}

@@ -15,6 +15,7 @@ pub struct ConfigInfo {
     pub post_exchanges: Vec<String>,
     pub file_path: String,
     pub subtopics: Vec<String>,
+    pub state: String,
 }
 
 pub struct Node {
@@ -59,7 +60,8 @@ impl IoBackend for NativeBackend {
                     component: component.clone(),
                     exchange: config.resolve_exchange(),
                     post_exchanges: config.resolve_post_exchanges(),
-                    file_path: config_file,
+                    file_path: config_file.clone(),
+                    state: crate::utils::get_state(&config_file),
                     subtopics: {
                         let mut t: Vec<String> = config.subscriptions.iter().flat_map(|s| s.bindings.iter().map(|b| b.topic.clone())).collect();
                         if t.is_empty() {
@@ -240,12 +242,17 @@ impl MyApp {
         let mut exchange_to_nodes: HashMap<String, Vec<usize>> = HashMap::new();
 
         for (i, info) in config_infos.into_iter().enumerate() {
-            let color = match info.component.as_str() {
-                "subscribe" => egui::Color32::from_rgb(100, 200, 100),
-                "sender" => egui::Color32::from_rgb(200, 100, 100),
-                "post" | "cpost" => egui::Color32::from_rgb(100, 100, 200),
-                "poll" => egui::Color32::from_rgb(200, 200, 100),
-                _ => egui::Color32::LIGHT_GRAY,
+            let color = if info.state.contains("(ERR)") {
+                egui::Color32::from_rgb(200, 100, 100) // Red
+            } else {
+                match info.state.as_str() {
+                    "run" => egui::Color32::from_rgb(100, 200, 100), // Green
+                    "stop" => egui::Color32::from_rgb(100, 100, 200), // Blue
+                    "new" => egui::Color32::LIGHT_GRAY,              // Grey
+                    "part" => egui::Color32::from_rgb(200, 200, 100), // Yellow/Gold
+                    "wvip" => egui::Color32::from_rgb(150, 255, 150), // Light Green
+                    _ => egui::Color32::LIGHT_GRAY,
+                }
             };
 
             exchange_to_nodes.entry(info.exchange.clone()).or_default().push(i);
@@ -441,6 +448,7 @@ impl eframe::App for MyApp {
                 if node_resp.hovered() {
                     egui::show_tooltip(ctx, node_id.with("tooltip"), |ui| {
                         ui.label(format!("Component: {}", node.info.component));
+                        ui.label(format!("State: {}", node.info.state));
                         ui.label(format!("Exchange: {}", node.info.exchange));
                         ui.label(format!("Posts to: {:?}", node.info.post_exchanges));
                     });

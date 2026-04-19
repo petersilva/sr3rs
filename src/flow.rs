@@ -741,7 +741,7 @@ mod tests {
  
     #[test] 
     fn test_message_adjust_post() {
-       let mut m = crate::message::Message::new("file:/", "home/peter/Sarracenia/bugs/samples/data/20200105/WXO-DD/meteocode/atl/csv/2020-01-05T03-00-01Z_FPHX14_r10zf_CC.csv");
+       let mut m = crate::message::Message::new("file:/home/peter/bugs/samples/data", "20200105/WXO-DD/meteocode/atl/csv/2020-01-05T03-00-01Z_FPHX14_r10zf_CC.csv");
        m.delete_on_post.insert("new_dir".to_string(), "/home/peter/Sarracenia/bugs/samples/data/20200105/WXO-DD/meteocode/atl/csv".to_string() );
        m.delete_on_post.insert("new_file".to_string(), "2020-01-05T03-00-01Z_FPHX14_r10zf_CC.csv".to_string() );
 
