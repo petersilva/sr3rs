@@ -38,9 +38,14 @@ async fn main() -> eframe::Result<()> {
     let config_infos = backend.load_configs().await;
     let positions = backend.load_positions().await;
 
-    eframe::run_native(
+    let window_title = if paths::is_config_dir_overridden() {
+        format!("sr3rs UI - {}", paths::get_user_config_dir().display())
+    } else {
+        "sr3rs UI".to_string()
+    };
 
-        "sr3rs UI",
+    eframe::run_native(
+        &window_title,
         native_options,
         Box::new(move |cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::light());

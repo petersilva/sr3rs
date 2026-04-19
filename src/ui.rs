@@ -386,6 +386,11 @@ impl eframe::App for MyApp {
                     self.offset = egui::Vec2::ZERO;
                 }
                 ui.label("Scroll to zoom, drag background to pan, drag nodes to move them. Click to edit.");
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let config_dir = crate::config::paths::get_user_config_dir();
+                    ui.label(egui::RichText::new(format!("Config Dir: {}", config_dir.display())).color(egui::Color32::DARK_GRAY));
+                });
             });
 
             let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
