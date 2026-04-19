@@ -39,6 +39,7 @@ pub trait IoBackend {
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String>;
     async fn load_positions(&self) -> HashMap<String, (f32, f32)>;
     async fn save_positions(&self, positions: HashMap<String, (f32, f32)>) -> Result<(), String>;
+    async fn execute_action(&self, action: &str, target: &str) -> Result<String, String>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -112,6 +113,22 @@ impl IoBackend for NativeBackend {
         let data = serde_json::to_string_pretty(&positions).map_err(|e| e.to_string())?;
         std::fs::write(path, data).map_err(|e| e.to_string())
     }
+
+    async fn execute_action(&self, action: &str, target: &str) -> Result<String, String> {
+        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let sr3rs_exe = current_exe.with_file_name("sr3rs");
+        
+        let mut cmd = std::process::Command::new(if sr3rs_exe.exists() { sr3rs_exe } else { current_exe });
+        cmd.arg(action).arg(target);
+
+        let output = cmd.output().map_err(|e| e.to_string())?;
+        
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).into_owned())
+        }
+    }
 }
 
 pub struct WebBackend {
@@ -178,6 +195,34 @@ impl IoBackend for WebBackend {
             Err(e) => Err(e.to_string()),
         }
     }
+
+    async fn execute_action(&self, action: &str, target: &str) -> Result<String, String> {
+        let url = format!("{}/api/action", self.base_url);
+        let client = reqwest::Client::new();
+        
+        #[derive(serde::Serialize)]
+        struct ActionPayload {
+            action: String,
+            target: String,
+        }
+        
+        let payload = ActionPayload {
+            action: action.to_string(),
+            target: target.to_string(),
+        };
+
+        match client.post(&url).json(&payload).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if let Ok(text) = resp.text().await {
+                    if status.is_success() { Ok(text) } else { Err(text) }
+                } else {
+                    Err("Failed to read response body".to_string())
+                }
+            },
+            Err(e) => Err(e.to_string()),
+        }
+    }
 }
 
 use std::sync::Arc;
@@ -196,6 +241,7 @@ pub struct MyApp {
     pub backend: Arc<dyn IoBackend>,
     pub async_load_result: Arc<std::sync::Mutex<Option<Result<(String, String), String>>>>,
     pub async_save_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    pub needs_refresh: bool,
 }
 
 impl MyApp {
@@ -212,6 +258,7 @@ impl MyApp {
             backend,
             async_load_result: Arc::new(std::sync::Mutex::new(None)),
             async_save_result: Arc::new(std::sync::Mutex::new(None)),
+            needs_refresh: false,
         }
     }
     
@@ -228,6 +275,7 @@ impl MyApp {
             backend,
             async_load_result: Arc::new(std::sync::Mutex::new(None)),
             async_save_result: Arc::new(std::sync::Mutex::new(None)),
+            needs_refresh: false,
         }
     }
 
@@ -307,8 +355,14 @@ impl eframe::App for MyApp {
         if let Ok(mut guard) = self.async_save_result.lock() {
             if let Some(res) = guard.take() {
                 match res {
-                    Ok(msg) => self.save_status = Some(msg),
-                    Err(e) => self.save_status = Some(format!("Error saving: {}", e)),
+                    Ok(msg) => {
+                        self.save_status = Some(msg);
+                        self.needs_refresh = true;
+                    },
+                    Err(e) => {
+                        self.save_status = Some(format!("Error saving/action: {}", e));
+                        self.needs_refresh = true;
+                    },
                 }
             }
         }
@@ -385,9 +439,48 @@ impl eframe::App for MyApp {
                 
                 let node_id = ui.id().with(&node.info.name);
                 let node_resp = ui.interact(rect, node_id, egui::Sense::click_and_drag());
-                
-                if node_resp.dragged() {
-                    node.pos += node_resp.drag_delta() / self.zoom;
+
+                node_resp.context_menu(|ui| {
+                    let actions = ["start", "stop", "enable", "disable", "cleanup", "remove"];
+                    for action in actions {
+                        if ui.button(action).clicked() {
+                            let _path = node.info.file_path.clone();
+                            let _backend = self.backend.clone();
+                            let _action = action.to_string();
+
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                match pollster::block_on(_backend.execute_action(&_action, &_path)) {
+                                    Ok(output) => {
+                                        self.save_status = Some(format!("{} completed: {}", _action, output));
+                                        self.needs_refresh = true;
+                                    },
+                                    Err(e) => {
+                                        self.save_status = Some(format!("Error running {}: {}", _action, e));
+                                        self.needs_refresh = true;
+                                    },
+                                }
+                            }
+
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                self.save_status = Some(format!("Running {}...", _action));
+                                let saver = self.async_save_result.clone();
+                                let ctx_clone = ctx.clone();
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let res = _backend.execute_action(&_action, &_path).await;
+                                    if let Ok(mut guard) = saver.lock() {
+                                        *guard = Some(res.map(|out| format!("{} completed: {}", _action, out)));
+                                    }
+                                    ctx_clone.request_repaint();
+                                });
+                            }
+                            ui.close_menu();
+                        }
+                    }
+                });
+
+                if node_resp.dragged() {                    node.pos += node_resp.drag_delta() / self.zoom;
                 }
                 
                 if node_resp.drag_stopped() {
@@ -586,6 +679,25 @@ impl eframe::App for MyApp {
                 
             if !is_open {
                 self.editing_path = None;
+            }
+        }
+        
+        if self.needs_refresh {
+            self.needs_refresh = false;
+            let backend = self.backend.clone();
+            
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let configs = pollster::block_on(backend.load_configs());
+                let positions = pollster::block_on(backend.load_positions());
+                self.build_graph(configs, positions);
+            }
+            
+            // For WASM we'd need another async_refresh_result mechanism.
+            // Leaving unimplemented for WASM as per user request scope, but keeping the placeholder.
+            #[cfg(target_arch = "wasm32")]
+            {
+                // Web refresh not fully implemented in this turn.
             }
         }
     }

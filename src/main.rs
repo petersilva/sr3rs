@@ -375,6 +375,10 @@ async fn main() -> Result<()> {
                     if cli.debug { cmd.arg("--debug"); }
                     if let Some(ref ll) = cli.log_level { cmd.arg("--logLevel").arg(ll); }
 
+                    cmd.stdout(std::process::Stdio::null());
+                    cmd.stderr(std::process::Stdio::null());
+                    cmd.stdin(std::process::Stdio::null());
+
                     cmd.spawn()?;
                 }
                 println!("Started {} instance(s) of {} as daemons.", num_instances, config_file);
@@ -954,6 +958,7 @@ async fn main() -> Result<()> {
             .route("/api/read", get(read_file))
             .route("/api/write", post(write_file))
             .route("/api/positions", get(get_positions).post(post_positions))
+            .route("/api/action", post(handle_action))
             .fallback_service(serve_dir)
             .layer(CorsLayer::permissive());
 
@@ -1105,4 +1110,18 @@ async fn get_positions() -> Json<std::collections::HashMap<String, (f32, f32)>> 
 async fn post_positions(axum::extract::Json(positions): axum::extract::Json<std::collections::HashMap<String, (f32, f32)>>) -> Result<(), (axum::http::StatusCode, String)> {
     let backend = NativeBackend;
     backend.save_positions(positions).await.map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))
+}
+
+#[derive(serde::Deserialize)]
+struct ActionPayload {
+    action: String,
+    target: String,
+}
+
+async fn handle_action(axum::extract::Json(payload): axum::extract::Json<ActionPayload>) -> Result<String, (axum::http::StatusCode, String)> {
+    let backend = NativeBackend;
+    match backend.execute_action(&payload.action, &payload.target).await {
+        Ok(output) => Ok(output),
+        Err(e) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
 }
