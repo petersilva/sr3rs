@@ -309,6 +309,12 @@ impl eframe::App for MyApp {
         let mut save_layout = false;
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            let edge_text_color = if ui.visuals().dark_mode {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::BLACK
+            };
+
             ui.horizontal(|ui| {
                 ui.heading("sr3rs Node Graph View");
                 if ui.button("Reset View").clicked() {
@@ -468,7 +474,7 @@ impl eframe::App for MyApp {
                         source_align,
                         &edge.post_exchange,
                         label_font.clone(),
-                        egui::Color32::BLACK,
+                        edge_text_color,
                     );
 
                     // Label at consumer: subtopics
@@ -479,7 +485,7 @@ impl eframe::App for MyApp {
                             consumer_align,
                             subtopics_text,
                             label_font,
-                            egui::Color32::BLACK,
+                            edge_text_color,
                         );
                     }
 

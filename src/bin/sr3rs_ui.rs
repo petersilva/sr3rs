@@ -24,7 +24,8 @@ async fn main() -> eframe::Result<()> {
     eframe::run_native(
         "sr3rs UI",
         native_options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            cc.egui_ctx.set_visuals(egui::Visuals::light());
             let mut app = MyApp::new(backend);
             app.build_graph(config_infos, positions);
             Box::new(app)
