@@ -13,6 +13,8 @@ This is a proof of concept for now.
    * state files are under ~/.cache/sr3rs.
 
 * what is implemented: 
+   * There is a GUI? really? there is!
+   * There is a web ui too... it's the same as the GUI.
    * All components, rudimentarily
    * the messages themselves are all wrong... don't try any interop tests. they work with each other for now.
    * All of the configuration options that are implemented, should do the same thing they do in python.
@@ -30,6 +32,16 @@ This is a proof of concept for now.
    * one of the built-in rust plugins is a plugin to run existing sr3 python flowcb plugins if it cannot find a rust one.
    * has little (no?) documentation yet.
 
+To run the Web UI
+-----------------
+
+```shell
+
+# clone the source repo.
+trunk build
+cargo run webui --port=8080 --configTree=~/.config/sr3rs
+
+```
 Development Method
 ------------------
 
