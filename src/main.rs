@@ -514,7 +514,7 @@ async fn main() -> Result<()> {
 
                 let mut state = if state_dir.join("disabled").exists() {
                     "stop".to_string()
-                } else if crashed_count > 0 {
+                } else if crashed_count > 0 && running_count == 0 {
                     "crashed".to_string()
                 } else if instances_requested == 0 && running_count == 0 {
                     if comp == "post" || comp == "cpost" {
