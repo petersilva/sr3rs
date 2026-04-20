@@ -1,0 +1,6 @@
+[book]
+authors = ["Peter Silva"]
+language = "fr"
+multilingual = false
+src = "."
+title = "Documentation sr3rs (FR)"
