@@ -112,9 +112,9 @@ enum Commands {
         /// Path or pattern to the configuration file(s)
         config_patterns: Vec<String>,
     },
-    /// Visualize data flows between configurations
+    /// Run native GUI to manage data flow configurations
     View,
-    /// Run a web-based UI for visualization and editing
+    /// A web server to manage data flow configurations with a browser
     #[command(name = "webui")]
     WebUi {
         /// Port to run the web server on
