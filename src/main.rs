@@ -465,6 +465,7 @@ async fn main() -> Result<()> {
                 };
 
                 let mut running_count = 0;
+                let mut crashed_count = 0;
                 let expected_count = if config_loaded { config.instances } else { 1 };
 
                 let mut state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name.as_deref().unwrap_or("unknown"));
@@ -492,9 +493,11 @@ async fn main() -> Result<()> {
                     let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i);
                     if pid_file.exists() {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.parse::<i32>() {
+                            if let Ok(pid) = pid_str.trim().parse::<i32>() {
                                 if is_process_running(pid) {
                                     running_count += 1;
+                                } else {
+                                    crashed_count += 1;
                                 }
                             }
                         }
@@ -511,6 +514,8 @@ async fn main() -> Result<()> {
 
                 let mut state = if state_dir.join("disabled").exists() {
                     "stop".to_string()
+                } else if crashed_count > 0 {
+                    "crashed".to_string()
                 } else if instances_requested == 0 && running_count == 0 {
                     if comp == "post" || comp == "cpost" {
                         "inte".to_string()
