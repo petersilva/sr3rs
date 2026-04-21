@@ -67,7 +67,7 @@ pub struct Config {
     pub directory: PathBuf,
     pub download: bool,
     pub report: bool,
-    pub strip: u32,
+    pub strip: Option<String>,
     pub accel_threshold: u32,
     pub time_copy: bool,
     pub message_debug_dump: bool,
@@ -159,7 +159,7 @@ impl Default for Config {
             queue_name: "q_${BROKER_USER}.${COMPONENT}.${CONFIG}.${QUEUESHARE}".to_string(),
             prefetch: 10,
             accel_threshold: 0,
-            strip: 0,
+            strip: None,
             expire: None,
             cluster: None,
             hostname: None,
@@ -602,6 +602,12 @@ impl Config {
                 "report_exchange" => {
                     if let Some(ref val) = v {
                         self.report_exchange = Some(val.to_string());
+                    }
+                    Ok(())
+                }
+                "strip" => {
+                    if let Some(ref val) = v {
+                        self.strip = Some(val.to_string());
                     }
                     Ok(())
                 }

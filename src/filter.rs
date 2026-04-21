@@ -16,7 +16,7 @@ pub struct Filter {
     pub accepting: bool,
     pub directory: PathBuf,
     pub mirror: bool,
-    // Future: add strip, pstrip, flatten here
+    pub strip: Option<String>,
 }
 
 fn dummy_regex() -> Regex {
@@ -24,14 +24,30 @@ fn dummy_regex() -> Regex {
 }
 
 impl Filter {
-    pub fn new(pattern: &str, accepting: bool, directory: PathBuf, mirror: bool) -> Result<Self, ConfigError> {
-        let regex = Regex::new(pattern)?;
+    pub fn new(val: &str, accepting: bool, directory: PathBuf, mirror: bool) -> Result<Self, ConfigError> {
+        let mut pattern = val.to_string();
+        let mut strip = None;
+
+        let parts: Vec<&str> = val.split_whitespace().collect();
+        if !parts.is_empty() {
+            pattern = parts[0].to_string();
+            for part in &parts[1..] {
+                if let Some((k, v)) = part.split_once('=') {
+                    if k == "strip" {
+                        strip = Some(v.to_string());
+                    }
+                }
+            }
+        }
+
+        let regex = Regex::new(&pattern)?;
         Ok(Self {
-            pattern: pattern.to_string(),
+            pattern,
             regex,
             accepting,
             directory,
             mirror,
+            strip,
         })
     }
 

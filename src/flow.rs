@@ -95,6 +95,23 @@ pub trait Flow: Send + Sync {
         let dest_dir = crate::config::variable_expansion::expand_variables(&raw_dest_dir, &vars);
         let mut rel_path = msg.rel_path.clone();
 
+        if let Some(strip_val) = msg.delete_on_post.get("_strip") {
+            if let Ok(n) = strip_val.parse::<usize>() {
+                if n > 0 {
+                    let parts: Vec<&str> = rel_path.split('/').collect();
+                    if parts.len() > n {
+                        rel_path = parts[n..].join("/");
+                    } else if !parts.is_empty() {
+                        rel_path = parts.last().unwrap().to_string(); // fallback to just filename if over-stripped
+                    }
+                }
+            } else if let Ok(re) = regex::Regex::new(strip_val) {
+                rel_path = re.replace(&rel_path, "").to_string();
+            } else {
+                ::log::warn!("Invalid strip value: {}", strip_val);
+            }
+        }
+
         ::log::info!("initial dest_dir: {:?} mirror: {:?}, rel_path: {:?}", dest_dir, mirror, rel_path);
 
         let new_rel_path = rel_path.strip_prefix(&dest_dir);
@@ -162,6 +179,9 @@ pub trait Flow: Send + Sync {
                 if mask.accepting {
                     msg.delete_on_post.insert("_dest_dir".to_string(), mask.directory.to_string_lossy().to_string());
                     msg.delete_on_post.insert("_mirror".to_string(), mask.mirror.to_string());
+                    if let Some(strip_val) = mask.strip.clone().or_else(|| config.strip.clone()) {
+                        msg.delete_on_post.insert("_strip".to_string(), strip_val);
+                    }
                     filtered_incoming.push(msg);
                 } else {
                     worklist.rejected.push(msg);
@@ -171,6 +191,9 @@ pub trait Flow: Send + Sync {
                 let mut msg = m;
                 msg.delete_on_post.insert("_dest_dir".to_string(), config.directory.to_string_lossy().to_string());
                 msg.delete_on_post.insert("_mirror".to_string(), config.mirror.to_string());
+                if let Some(strip_val) = config.strip.clone() {
+                    msg.delete_on_post.insert("_strip".to_string(), strip_val);
+                }
                 filtered_incoming.push(msg);
             } else {
                 worklist.rejected.push(m);
@@ -247,20 +270,31 @@ pub trait Flow: Send + Sync {
                 let dest_dir = m.delete_on_post.get("_dest_dir")
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| config.directory.clone());
-                
+
                 let mirror = m.delete_on_post.get("_mirror")
                     .map(|s| s == "true")
                     .unwrap_or(config.mirror);
 
-                let rel_path = m.rel_path.trim_start_matches('/');
-
-                let local_file = if mirror {
-                    dest_dir.join(rel_path)
+                let local_file = if let (Some(new_dir), Some(new_file)) = (
+                    m.delete_on_post.get("new_dir"),
+                    m.delete_on_post.get("new_file")
+                ) {
+                    if new_dir == "." {
+                        std::path::PathBuf::from(new_file)
+                    } else {
+                        std::path::PathBuf::from(new_dir).join(new_file)
+                    }
                 } else {
-                    let filename = std::path::Path::new(rel_path)
-                        .file_name()
-                        .unwrap_or_else(|| std::ffi::OsStr::new("unknown"));
-                    dest_dir.join(filename)
+                    // Fallback to legacy computation if they are missing
+                    let rel_path = m.rel_path.trim_start_matches('/');
+                    if mirror {
+                        dest_dir.join(rel_path)
+                    } else {
+                        let filename = std::path::Path::new(rel_path)
+                            .file_name()
+                            .unwrap_or_else(|| std::ffi::OsStr::new("unknown"));
+                        dest_dir.join(filename)
+                    }
                 };
 
                 if m.file_operation.contains_key("directory") {
