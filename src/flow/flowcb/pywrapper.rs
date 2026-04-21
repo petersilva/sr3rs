@@ -168,6 +168,9 @@ class MockConfig:
         dict.set_item("baseUrl", &msg.base_url)?;
         dict.set_item("relPath", &msg.rel_path)?;
         dict.set_item("pubTime", msg.pub_time.to_rfc3339())?;
+        if let Some(ack_id) = &msg.ack_id {
+            dict.set_item("ack_id", ack_id)?;
+        }
         
         for (k, v) in &msg.fields {
             dict.set_item(k, v)?;
@@ -183,9 +186,13 @@ class MockConfig:
         let rel_path: String = dict.get_item("relPath")?.unwrap().extract()?;
         let mut msg = Message::new(&base_url, &rel_path);
         
+        if let Ok(Some(ack_id)) = dict.get_item("ack_id").map(|i| i.map(|x| x.extract::<String>().unwrap_or_default())) {
+            msg.ack_id = Some(ack_id);
+        }
+        
         for (k, v) in dict.iter() {
             let k_str: String = k.extract()?;
-            if k_str != "baseUrl" && k_str != "relPath" {
+            if k_str != "baseUrl" && k_str != "relPath" && k_str != "ack_id" {
                 if let Ok(v_str) = v.extract::<String>() {
                     if k_str.starts_with("new_") || k_str.starts_with("_") {
                         msg.delete_on_post.insert(k_str, v_str);

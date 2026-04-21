@@ -33,6 +33,11 @@ impl SimpleDiskQueue {
         self.save();
     }
 
+    pub fn put_ref(&mut self, msgs: &[Message]) {
+        self.queue.extend(msgs.iter().cloned());
+        self.save();
+    }
+
     pub fn get(&mut self, qty: usize) -> Vec<Message> {
         let count = std::cmp::min(qty, self.queue.len());
         let mut res = Vec::with_capacity(count);
@@ -190,7 +195,7 @@ impl FlowCB for RetryPlugin {
             let mut dl_queue_guard = self.download_retry.lock().unwrap();
             if let Some(dl_queue) = dl_queue_guard.as_mut() {
                 ::log::debug!("putting {} messages into download retry queue", wl.failed.len());
-                dl_queue.put(&mut wl.failed);
+                dl_queue.put_ref(&wl.failed);
             }
         }
 
@@ -226,13 +231,14 @@ impl FlowCB for RetryPlugin {
     async fn after_post(&self, wl: &mut Worklist) -> anyhow::Result<()> {
         // Messages in wl.failed go into post_retry
         if !wl.failed.is_empty() {
-            for m in &mut wl.failed {
+            let mut failed_copy = wl.failed.clone();
+            for m in &mut failed_copy {
                 Self::set_is_retry(m);
             }
             
             let mut post_queue_guard = self.post_retry.lock().unwrap();
             if let Some(post_queue) = post_queue_guard.as_mut() {
-                post_queue.put(&mut wl.failed);
+                post_queue.put(&mut failed_copy);
             }
         }
         Ok(())

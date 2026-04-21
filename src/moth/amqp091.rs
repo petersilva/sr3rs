@@ -159,7 +159,10 @@ impl Moth for Amqp091 {
                 }
             }
             Some(Err(e)) => Err(anyhow::Error::from(e)),
-            None => Ok(None),
+            None => {
+                self.consumer = None;
+                Ok(None)
+            }
         }
     }
 

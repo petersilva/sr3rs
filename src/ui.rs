@@ -301,6 +301,7 @@ impl MyApp {
                     "stop" => egui::Color32::from_rgb(100, 100, 200), // Blue
                     "new" => egui::Color32::LIGHT_GRAY,              // Grey
                     "part" => egui::Color32::from_rgb(200, 200, 100), // Yellow/Gold
+                    "crashed" => egui::Color32::from_rgb( 200, 100, 100), // Red
                     "wvip" => egui::Color32::from_rgb(150, 255, 150), // Light Green
                     _ => egui::Color32::LIGHT_GRAY,
                 }

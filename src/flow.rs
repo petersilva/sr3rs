@@ -365,14 +365,17 @@ pub trait Flow: Send + Sync {
         let mut failed_count = 0;
         let mut bytes_out = 0;
 
-        for mut m in worklist.ok.drain(..) {
+        for m in worklist.ok.drain(..) {
 
             ::log::info!( "posting message: {:?}", m);
             let mut failed_indices = Vec::new();
             for (idx, pub_mutex) in publishers.iter().enumerate() {
-                self.message_adjust_post( &mut m, &self.config().publishers[idx] );
+                // Clone the message for each publisher to avoid cross-contamination of modifications
+                // like rel_path and base_url.
+                let mut m_copy = m.clone();
+                self.message_adjust_post( &mut m_copy, &self.config().publishers[idx] );
                 let mut p = pub_mutex.lock().await;
-                if let Err(e) = p.publish_mut(&m).await {
+                if let Err(e) = p.publish_mut(&m_copy).await {
                     ::log::error!("POST: failed to publish to {}: {}", redact_url(&p.broker_url), e);
                     failed_indices.push(idx);
                 }
@@ -476,10 +479,17 @@ pub trait Flow: Send + Sync {
         }
 
         self.post(worklist).await?;
+        
+        // Count how many we actually processed in this cycle.
+        // We must do this BEFORE ack() because ack() might clear the worklist.
+        let processed = gathered_count + worklist.ok.len() + worklist.failed.len() + worklist.rejected.len();
+        
         self.ack(worklist).await?;
         
-        // Count how many we actually processed in some way
-        let processed = gathered_count + worklist.ok.len() + worklist.failed.len() + worklist.rejected.len();
+        // Ensure worklist is clear for the next run_once iteration, 
+        // even if the specific Flow implementation of ack() didn't clear it.
+        worklist.clear();
+        
         Ok(processed)
     }
 

@@ -349,7 +349,6 @@ impl Flow for SubscribeFlow {
             }
         }
 
-        worklist.clear();
         Ok(())
     }
 

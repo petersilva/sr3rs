@@ -8,6 +8,7 @@ use crate::Config;
 use crate::moth::MothFactory;
 use crate::utils::redact_url;
 use async_trait::async_trait;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::transfer::get_transfer;
@@ -342,13 +343,14 @@ impl Flow for SenderFlow {
                 }
 
                 // Remote location: new_dir + new_file
-                let remote_dir = m.delete_on_post.get("new_dir").cloned().unwrap_or_else(|| ".".to_string());
+                let remote_dir = Path::new("/").join(m.delete_on_post.get("new_dir").cloned().unwrap_or_else(|| ".".to_string()));
                 let remote_file_name = m.delete_on_post.get("new_file").cloned().unwrap_or_else(|| m.rel_path.clone());
                 
-                let remote_full_path = if remote_dir == "." || remote_dir.is_empty() {
+                //let remote_full_path = if remote_dir == "." || remote_dir.is_empty() {
+                let remote_full_path = if remote_dir == Path::new(".") {
                     remote_file_name
                 } else {
-                    format!("{}/{}", remote_dir.trim_end_matches('/'), remote_file_name.trim_start_matches('/'))
+                    format!("{}/{}", remote_dir.to_string_lossy().trim_end_matches('/'), remote_file_name.trim_start_matches('/'))
                 };
 
                 match transfer.put(&m, &local_file, &remote_full_path).await {
@@ -407,7 +409,6 @@ impl Flow for SenderFlow {
                 }
             }
         }
-        worklist.clear();
         Ok(())
     }
 
