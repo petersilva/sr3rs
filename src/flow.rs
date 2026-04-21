@@ -263,6 +263,42 @@ pub trait Flow: Send + Sync {
                     dest_dir.join(filename)
                 };
 
+                if m.file_operation.contains_key("directory") {
+                    match std::fs::create_dir_all(&local_file) {
+                        Ok(_) => {
+                            ::log::info!("WORK: created directory {}", local_file.display());
+                            #[cfg(unix)]
+                            {
+                                if let Some(mode_str) = m.fields.get("mode") {
+                                    use std::os::unix::fs::PermissionsExt;
+                                    let mode_val = if mode_str.starts_with('0') {
+                                        u32::from_str_radix(&mode_str[1..], 8).unwrap_or(0)
+                                    } else {
+                                        u32::from_str_radix(mode_str, 8).unwrap_or(0)
+                                    };
+                                    if mode_val > 0 {
+                                        if let Ok(metadata) = std::fs::metadata(&local_file) {
+                                            let mut perms = metadata.permissions();
+                                            perms.set_mode(mode_val);
+                                            let _ = std::fs::set_permissions(&local_file, perms);
+                                        }
+                                    }
+                                }
+                            }
+                            m.fields.insert("size".to_string(), "0".to_string());
+                            worklist.directories_ok.push(local_file.to_string_lossy().to_string());
+                            worklist.ok.push(m);
+                            ok_count += 1;
+                        }
+                        Err(e) => {
+                            ::log::error!("WORK: failed to create directory {}: {}", local_file.display(), e);
+                            worklist.failed.push(m);
+                            failed_count += 1;
+                        }
+                    }
+                    continue;
+                }
+
                 match transfer.get(&m, &local_file).await {
                     Ok(size) => {
                         ::log::info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);

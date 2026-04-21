@@ -222,4 +222,20 @@ impl Transfer for FtpTransfer {
         ftp.quit().await?;
         Ok(uploaded)
     }
+
+    async fn mkdir(&self, remote_dir: &str) -> anyhow::Result<()> {
+        let target_url = if let Some(st) = &self.config.send_to {
+            st.clone()
+        } else {
+            anyhow::bail!("mkdir requires sendTo configured for FTP");
+        };
+
+        let mut ftp = self.connect(&target_url).await?;
+
+        // Ftp cd_forced creates the directory recursively if it doesn't exist
+        self.cd_forced(&mut ftp, remote_dir).await?;
+
+        let _ = ftp.quit().await;
+        Ok(())
+    }
 }

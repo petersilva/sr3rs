@@ -47,4 +47,12 @@ impl Transfer for FileTransfer {
         // FIXME: implement put for local file if needed (sender to local)
         Err(anyhow::anyhow!("PUT not implemented for FileTransfer"))
     }
+
+    async fn mkdir(&self, remote_dir: &str) -> anyhow::Result<()> {
+        let path = Path::new(remote_dir);
+        if !path.exists() {
+            fs::create_dir_all(path)?;
+        }
+        Ok(())
+    }
 }

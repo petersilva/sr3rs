@@ -220,4 +220,32 @@ impl Transfer for SftpTransfer {
             Ok(uploaded)
         }).await?
     }
+
+    async fn mkdir(&self, remote_dir: &str) -> anyhow::Result<()> {
+        let remote_dir_str = remote_dir.to_string();
+        let target_url = if let Some(st) = &self.config.send_to {
+            st.clone()
+        } else {
+            // Technically base_url of message but we only have self.config here.
+            // If sender is calling this, send_to should be set. If not, error out early or fall back.
+            anyhow::bail!("mkdir requires sendTo configured for SFTP")
+        };
+
+        let self_clone = Self::new(&self.config);
+        tokio::task::spawn_blocking(move || {
+            let sess = self_clone.connect_to(&target_url)?;
+            let sftp = sess.sftp()?;
+            
+            let remote_p = Path::new(&remote_dir_str);
+            
+            // Basic mkdir -p equivalent for remote path
+            let mut current = std::path::PathBuf::new();
+            for part in remote_p.components() {
+                current.push(part);
+                let _ = sftp.mkdir(&current, 0o775); // ignore error if it already exists
+            }
+            
+            Ok(())
+        }).await?
+    }
 }

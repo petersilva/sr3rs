@@ -353,6 +353,28 @@ impl Flow for SenderFlow {
                     format!("{}/{}", remote_dir.to_string_lossy().trim_end_matches('/'), remote_file_name.trim_start_matches('/'))
                 };
 
+                if m.file_operation.contains_key("directory") {
+                    ::log::info!("WORK: remote directory creation requested for {}", remote_full_path);
+                    
+                    match transfer.mkdir(&remote_full_path).await {
+                        Ok(_) => {
+                            m.fields.insert("size".to_string(), "0".to_string());
+                            
+                            if let Some(post_url) = &config.post_base_url {
+                                m.base_url = post_url.clone();
+                            } else if let Some(send_to) = &config.send_to {
+                                m.base_url = send_to.clone();
+                            }
+                            worklist.ok.push(m);
+                        }
+                        Err(e) => {
+                            ::log::error!("WORK: failed to create remote directory {}: {}", remote_full_path, e);
+                            worklist.failed.push(m);
+                        }
+                    }
+                    continue;
+                }
+
                 match transfer.put(&m, &local_file, &remote_full_path).await {
                     Ok(size) => {
                         log::info!("WORK: sent {} to {} ({} bytes)", local_file.display(), remote_full_path, size);

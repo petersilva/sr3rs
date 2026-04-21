@@ -56,4 +56,10 @@ impl Transfer for HttpTransfer {
     async fn put(&self, _msg: &Message, _local_file: &Path, _remote_file: &str) -> anyhow::Result<u64> {
         anyhow::bail!("HTTP PUT not implemented")
     }
+
+    async fn mkdir(&self, _remote_dir: &str) -> anyhow::Result<()> {
+        // HTTP doesn't usually have a standard mkdir that we use.
+        // WebDAV MKCOL exists but standard Sarracenia HTTP ignores it.
+        Ok(())
+    }
 }
