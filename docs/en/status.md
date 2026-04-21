@@ -3,10 +3,21 @@
 
 Tracking what is going on in the project.
 
+
 * have a pas_sr3rs branch in sr_insects.
 
+
+## testing method.
 Using the insects/static_flow tests 
 
+ * f00 - post t_dd_f* seems to work, 
+      * they post to the sarra_download_f20 queue.  2250 messages show up, 
+      * 1125 files in the right tree.
+ * f20 - the sarra download works perfectly also -- leaving 1125 messages for subscribe_amqp
+ * f30 - subscribe/amqp_f30 ...
+      * 1125 files in the right tree. TESTROOT/downloaded_by_amqp
+ * f40 - watch/f40 ... loses messages. 
+ * f50 - sender/tsource2send send to TESTROOT/sent_by_tsource2send.
 # Missing/deferred features.
 
 * for Messages: only AMQP091 for now.  Want to get that fully working, then do the others. 
@@ -25,7 +36,12 @@ Using the insects/static_flow tests
 
 
 
-# Incompat
+# Incompatibilities
+
+## Stuff to fix later.
+
+search path for python modules is currently hard coded to let the tests work.
+
 
 ## delete_on_post
 

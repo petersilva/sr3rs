@@ -137,7 +137,7 @@ impl GatherFilePlugin {
             return Ok(());
         }
 
-        let (tx, rx) = mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(10240);
         let tx_clone = tx.clone();
 
         let mut watcher = RecommendedWatcher::new(move |res: notify::Result<Event>| {
@@ -147,7 +147,9 @@ impl GatherFilePlugin {
                     match event.kind {
                         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Any => {
                             for path in event.paths {
-                                let _ = tx_clone.blocking_send(Ok(path));
+                                if let Err(e) = tx_clone.try_send(Ok(path)) {
+                                    ::log::warn!("GatherFile: watcher event dropped (channel full): {}", e);
+                                }
                             }
                         }
                         // FIXME: we care about removals also.
@@ -155,7 +157,7 @@ impl GatherFilePlugin {
                     }
                 }
                 Err(e) => {
-                    let _ = tx_clone.blocking_send(Err(anyhow::anyhow!("Watcher error: {}", e)));
+                    let _ = tx_clone.try_send(Err(anyhow::anyhow!("Watcher error: {}", e)));
                 }
             }
         }, notify::Config::default())?;
