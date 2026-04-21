@@ -27,8 +27,14 @@ impl FileTransfer {
 impl Transfer for FileTransfer {
     async fn get(&self, msg: &Message, local_file: &Path) -> anyhow::Result<u64> {
         let remote_url = url::Url::parse(&msg.base_url)?;
-        let remote_path = remote_url.path().trim_start_matches('/');
-        let source_path = Path::new(remote_path).join(&msg.rel_path);
+        let remote_path = remote_url.path(); // Don't trim the leading slash for absolute file URLs!
+        
+        let source_path = if remote_path.starts_with('/') {
+            Path::new(remote_path).join(&msg.rel_path)
+        } else {
+            // Fallback for relative paths, though file:// URLs typically specify absolute paths.
+            Path::new("/").join(remote_path).join(&msg.rel_path)
+        };
 
         if !source_path.exists() {
             return Err(anyhow::anyhow!("Source file not found: {}", source_path.display()));
