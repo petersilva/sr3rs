@@ -933,13 +933,15 @@ async fn main() -> Result<()> {
             // Phase 7: Declare queues and bindings for all configs
             log::info!("Phase 7: Declaring queues and bindings...");
             for (config_file, _component, mut flow) in flows {
+                // Save state first so that queue name persistence happens even if bindings fail
+                if let Err(e) = flow.config().save_state() {
+                    log::error!("Failed to save state for {}: {}", config_file, e);
+                }
+                
                 if let Err(e) = flow.connect_queues().await {
                     log::error!("Failed to declare queues/bindings for {}: {}", config_file, e);
                 } else {
                     println!("Declaration complete for {}.", config_file);
-                    if let Err(e) = flow.config().save_state() {
-                        log::error!("Failed to save state for {}: {}", config_file, e);
-                    }
                 }
                 let _ = flow.shutdown().await;
             }
