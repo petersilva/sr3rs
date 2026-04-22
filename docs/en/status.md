@@ -45,9 +45,10 @@ search path for python modules is currently hard coded to let the tests work.
 
 ## delete_on_post
 
-In the python implementation, there is a field in messages called *deleteOnPost*  which contains the names of fields that are to be deleted prior to publishing a message.
-In the rust implemetnation, it is different, there is a separate HashMap so we just omit the single delete_on_post HashMap from messages sent.  But that means that
-all temp stuff in messages is m.delete_on_post[ 'key' ] = ['value' ] ...   
+In the python implementation, there is a field in messages called *deleteOnPost*  which contains the names of fields
+that are to be deleted prior to publishing a message. In the rust implemetnation, it is different, there is a 
+separate HashMap so we just omit the single delete_on_post HashMap from messages sent.  But that means that all temp 
+stuff in messages is m.delete_on_post[ 'key' ] = ['value' ] ...   
 
 If a python plugin sets such a field, it needs a mapping when calling it.
 

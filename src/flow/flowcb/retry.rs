@@ -75,6 +75,7 @@ impl SimpleDiskQueue {
 pub struct RetryPlugin {
     pub name: String,
     pub retry_refilter: bool,
+    pub attempts: u32,
     pub batch_size: usize,
     pub download_retry: Mutex<Option<SimpleDiskQueue>>,
     pub post_retry: Mutex<Option<SimpleDiskQueue>>,
@@ -96,6 +97,7 @@ impl RetryPlugin {
         Self {
             name: "retry".to_string(),
             retry_refilter,
+            attempts: config.attempts,
             batch_size: config.batch as usize,
             download_retry: Mutex::new(None),
             post_retry: Mutex::new(None),
@@ -103,13 +105,15 @@ impl RetryPlugin {
         }
     }
 
-    fn set_is_retry(msg: &mut Message) {
-        let current = msg.fields.get("_isRetry")
+    fn get_retry_count(msg: &Message) -> u32 {
+        msg.delete_on_post.get("_isRetry")
             .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(0);
-        
+            .unwrap_or(0)
+    }
+
+    fn increment_retry_count(msg: &mut Message) {
+        let current = Self::get_retry_count(msg);
         msg.delete_on_post.insert("_isRetry".to_string(), (current + 1).to_string());
-        
     }
 }
 
@@ -149,10 +153,7 @@ impl FlowCB for RetryPlugin {
 
             let qty = (self.batch_size / 2).saturating_sub(wl.incoming.len());
             if qty > 0 {
-                let mut msgs = dl_queue.get(qty);
-                for m in &mut msgs {
-                    Self::set_is_retry(m);
-                }
+                let msgs = dl_queue.get(qty);
                 if !msgs.is_empty() {
                     wl.incoming.extend(msgs);
                 }
@@ -178,10 +179,7 @@ impl FlowCB for RetryPlugin {
                 return Ok(());
             }
 
-            let mut msgs = dl_queue.get(qty);
-            for m in &mut msgs {
-                Self::set_is_retry(m);
-            }
+            let msgs = dl_queue.get(qty);
             if !msgs.is_empty() {
                 wl.incoming.extend(msgs);
             }
@@ -192,11 +190,35 @@ impl FlowCB for RetryPlugin {
     async fn after_work(&self, wl: &mut Worklist) -> anyhow::Result<()> {
         // Messages in wl.failed go into download_retry
         if !wl.failed.is_empty() {
-            let mut dl_queue_guard = self.download_retry.lock().unwrap();
-            if let Some(dl_queue) = dl_queue_guard.as_mut() {
-                ::log::debug!("putting {} messages into download retry queue", wl.failed.len());
-                dl_queue.put_ref(&wl.failed);
+            let failed = std::mem::take(&mut wl.failed);
+            let mut to_retry = Vec::new();
+            let mut gave_up = Vec::new();
+
+            for mut m in failed {
+                Self::increment_retry_count(&mut m);
+                let count = Self::get_retry_count(&m);
+                if count < self.attempts {
+                    to_retry.push(m);
+                } else {
+                    ::log::error!("gave up after {} retries: {}/{}", count, m.base_url, m.rel_path);
+                    gave_up.push(m);
+                }
             }
+
+            if !to_retry.is_empty() {
+                let mut dl_queue_guard = self.download_retry.lock().unwrap();
+                if let Some(dl_queue) = dl_queue_guard.as_mut() {
+                    ::log::debug!("putting {} messages into download retry queue", to_retry.len());
+                    dl_queue.put_ref(&to_retry);
+                }
+                // Once persisted, we move them to rejected so they get ACKed but not POSTed.
+                // They are no longer in 'failed' for this cycle, because they are 'handled' by retry.
+                wl.rejected.extend(to_retry);
+            }
+            
+            // The ones we gave up on go back to wl.failed. 
+            // They have _isRetry set, so ack() should know to ACK them instead of NACKing.
+            wl.failed.extend(gave_up);
         }
 
         // Check if we can retry posting
@@ -231,15 +253,31 @@ impl FlowCB for RetryPlugin {
     async fn after_post(&self, wl: &mut Worklist) -> anyhow::Result<()> {
         // Messages in wl.failed go into post_retry
         if !wl.failed.is_empty() {
-            let mut failed_copy = wl.failed.clone();
-            for m in &mut failed_copy {
-                Self::set_is_retry(m);
+            let failed = std::mem::take(&mut wl.failed);
+            let mut to_retry = Vec::new();
+            let mut gave_up = Vec::new();
+
+            for mut m in failed {
+                Self::increment_retry_count(&mut m);
+                let count = Self::get_retry_count(&m);
+                if count < self.attempts {
+                    to_retry.push(m);
+                } else {
+                    ::log::error!("gave up after {} retries: {}/{}", count, m.base_url, m.rel_path);
+                    gave_up.push(m);
+                }
+            }
+
+            if !to_retry.is_empty() {
+                let mut post_queue_guard = self.post_retry.lock().unwrap();
+                if let Some(post_queue) = post_queue_guard.as_mut() {
+                    post_queue.put_ref(&to_retry);
+                }
+                // For post failures, they are already "after_work", so moving to rejected is fine for ACKing.
+                wl.rejected.extend(to_retry);
             }
             
-            let mut post_queue_guard = self.post_retry.lock().unwrap();
-            if let Some(post_queue) = post_queue_guard.as_mut() {
-                post_queue.put(&mut failed_copy);
-            }
+            wl.failed.extend(gave_up);
         }
         Ok(())
     }

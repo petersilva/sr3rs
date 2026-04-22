@@ -343,7 +343,13 @@ impl Flow for SubscribeFlow {
             for m in &worklist.failed {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
-                        let _ = consumer.moth.nack(ack_id).await;
+                        // If _isRetry is present, it means RetryPlugin handled it (either persisted or gave up)
+                        // In both cases, we should ACK it to the broker so it's not re-delivered.
+                        if m.delete_on_post.contains_key("_isRetry") {
+                            let _ = consumer.moth.ack(ack_id).await;
+                        } else {
+                            let _ = consumer.moth.nack(ack_id).await;
+                        }
                     }
                 }
             }

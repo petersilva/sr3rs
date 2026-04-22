@@ -550,6 +550,11 @@ pub trait Flow: Send + Sync {
 
         self.post(worklist).await?;
         
+        for cb_mutex in self.callbacks() {
+            let cb = cb_mutex.lock().await;
+            cb.after_post(worklist).await?;
+        }
+        
         // Count how many we actually processed in this cycle.
         // We must do this BEFORE ack() because ack() might clear the worklist.
         let processed = gathered_count + worklist.ok.len() + worklist.failed.len() + worklist.rejected.len();
