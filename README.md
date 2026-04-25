@@ -109,12 +109,12 @@ All of the following documentation refers to the python version (to be gradually
 
 [ homepage (En): https://metpx.github.io/sarracenia ] [ `(Fr) fr/ <https://metpx.github.io/sarracenia/fr>`_ ]
 
-|----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 |                                                                                        |                                                                                           |
 | [ `Getting Started <https://metpx.github.io/sarracenia/How2Guides/subscriber.html>`_ ] | [ `Un bon départ <https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>`_ ] |
 | [ `Source Guide <https://metpx.github.io/sarracenia/How2Guides/source.html>`_ ]        | [ `Guide de Source <https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>`_ ]   |
 |                                                                                        |                                                                                           |
-|----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 |                                                                                        |                                                                                           |
 | MetPX-sr3 (Sarracenia v3) is a data duplication                                        | MetPX-sr3 (Sarracenia v3) est un engin de copie et de                                     |
 | or distribution pump that leverages                                                    | distribution de données qui utilise des                                                   |
@@ -129,5 +129,3 @@ All of the following documentation refers to the python version (to be gradually
 |                                                                                        | maintenir l'intégrité de la structure des                                                 |
 |                                                                                        | données, tel que proposée et organisée par la                                             |
 |                                                                                        | source jusqu'à destination.                                                               |
-|                                                                                        |                                                                                           |
-|----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
