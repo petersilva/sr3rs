@@ -36,29 +36,29 @@ This is a proof of concept for now.
    * has little (no?) documentation yet.
 
 
-Getting Started
----------------
+## Getting Started
 
 
 This should install compiled binaries in ~/.cargo/bin:
+
 ```shell
-install_path=`pwd`
-cargo install --path=${install_path}
+
+   % install_path=`pwd`
+   % cargo install --path=${install_path}
 
 ```
 The main entry point is *sr3rs*, but just like the python version, there is also *sr3rs_post.*
 
 
 
-Native Graphical UI
--------------------
+### Native Graphical UI
 
 If you are on linux or perhaps WSL, the local ui might work. to  try it out:
 
 ```shell
 
-# git clone..
-cargo run view
+   # git clone..
+   cargo run view
 
 ```
 That should start up the GUI, looking at the default location for the configuration tree: ~/.config/sr3rs.
@@ -86,8 +86,7 @@ so a persistent arrangement of the boxes is kept.
 
 
 
-To run the Web UI
------------------
+### To run the Web UI
 
 Note: there is no security on the web ui... so do this only where it is reasonably safe.
 
@@ -101,8 +100,7 @@ cargo run webui --port=8080 --configTree=~/.config/sr3rs
 open a browser window for localhost:8080
 
 
-Documentation
--------------
+## Documentation
 
 look under docs.  There are en and fr sub-dirs for the languages.
 Just a place holder for now.

@@ -16,8 +16,13 @@ Using the insects/static_flow tests
  * f20 - the sarra download works perfectly also -- leaving 1125 messages for subscribe_amqp
  * f30 - subscribe/amqp_f30 ...
       * 1125 files in the right tree. TESTROOT/downloaded_by_amqp
- * f40 - watch/f40 ... loses messages. 
- * f50 - sender/tsource2send send to TESTROOT/sent_by_tsource2send.
+ * f40 - watch/f40 ... loses messages. e.g. 1124 in... 1097 out
+ * f50 - sender/tsource2send send to TESTROOT/sent_by_tsource2send. 1097 in, 1097 out.
+ *     - posted_by_shim, perfect (1097.)
+ * f61 - sub_cp ... borked.
+ * 
+
+
 # Missing/deferred features.
 
 * for Messages: only AMQP091 for now.  Want to get that fully working, then do the others. 
@@ -57,6 +62,8 @@ If a python plugin sets such a field, it needs a mapping when calling it.
 
 Elements already addressed in the current implementation.
 
+-- confirmed that amqp connections broken are recovered.
+-- confirmed disk retry works (basically.)
 -- host state dir... forget what the option is called.
 -- GUI change config root, to work with other trees.
 -- delete fields present in posted messages.
