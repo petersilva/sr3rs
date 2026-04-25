@@ -105,11 +105,15 @@ open a browser window for localhost:8080
 look under docs.  There are en and fr sub-dirs for the languages.
 Just a place holder for now.
 
+[ sr3rs: [En](docs/en) [Fr](docs/fr) ]
+
+only thing uptodate for now is hopefully: [status](docs/en/status) 
+
 All of the following documentation refers to the python version (to be gradually replaced:):
 
 ## English
 
-[ [sr3rs En](docs/en) ][ [homepage (En)](https://metpx.github.io/sarracenia) ] [ `[(Fr) fr/](<https://metpx.github.io/sarracenia/fr>) ]
+[ [homepage (En)](https://metpx.github.io/sarracenia) ] [ `[(Fr) fr/](<https://metpx.github.io/sarracenia/fr>) ]
 
 [ [Getting Started](https://metpx.github.io/sarracenia/How2Guides/subscriber.html>) ] [ [Source Guide](https://metpx.github.io/sarracenia/How2Guides/source.html>) ] 
 
@@ -127,7 +131,7 @@ client.
 
 ## Français
 
-[ [sr3rs Fr](docs/fr) ] [ [Un bon départ](https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>) ] [ [Guide de Source](https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>) ]
+(docs/fr) ] [ [Un bon départ](https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>) ] [ [Guide de Source](https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>) ]
 
 MetPX-sr3 (Sarracenia v3) est un engin de copie et de
 distribution de données qui utilise des
