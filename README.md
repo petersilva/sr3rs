@@ -109,6 +109,8 @@ All of the following documentation refers to the python version (to be gradually
 
 [ homepage (En): https://metpx.github.io/sarracenia ] [ `(Fr) fr/ <https://metpx.github.io/sarracenia/fr>`_ ]
 
+```css
+
 <div class="two-column-grid">
    <div class="column">
  [ `Getting Started <https://metpx.github.io/sarracenia/How2Guides/subscriber.html>`_ ] 
@@ -170,3 +172,4 @@ source jusqu'à destination.
   }
 }
 </style>
+```
