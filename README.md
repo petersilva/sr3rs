@@ -107,7 +107,7 @@ Just a place holder for now.
 
 [ sr3rs: [En](docs/en) [Fr](docs/fr) ]
 
-only thing uptodate for now is hopefully: [status](docs/en/status.md) 
+only thing uptodate for now is hopefully: [status](blob/main/docs/en/status.md)
 
 All of the following documentation refers to the python version (to be gradually replaced:):
 
