@@ -40,4 +40,7 @@ impl Moth for Mqtt {
     async fn close(&mut self) -> Result<()> {
         Ok(())
     }
+    fn is_closed(&self) -> bool {
+        false
+    }
 }

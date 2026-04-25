@@ -242,4 +242,8 @@ impl Moth for Amqp091 {
         self.connection.close(0, "Moth closed").await?;
         Ok(())
     }
+
+    fn is_closed(&self) -> bool {
+        self.connection.status().closed() || self.channel.status().state() == lapin::ChannelState::Closed
+    }
 }

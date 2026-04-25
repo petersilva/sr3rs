@@ -14,15 +14,44 @@ use tokio::sync::Mutex;
 
 pub struct MothConsumer {
     pub moth: Box<dyn Moth>,
-    pub broker_url: String,
+    pub broker: crate::broker::Broker,
     pub subscription_idx: usize,
 }
 
 pub struct MothPublisher {
     pub options: serde_json::Value,
     pub moth: Box<dyn Moth>,
-    pub broker_url: String,
+    pub broker: crate::broker::Broker,
     pub exchanges: Vec<String>,
+}
+
+impl MothConsumer {
+    pub async fn reconnect(&mut self, config: &Config) -> anyhow::Result<()> {
+        log::warn!("Reconnecting consumer to broker: {}", self.broker.redacted());
+        let _ = self.moth.close().await;
+        
+        self.moth = MothFactory::new(&self.broker, true).await?;
+        
+        let sub = &config.subscriptions[self.subscription_idx];
+        self.moth.set_consume_options(&sub.queue.name, config.prefetch as u16, sub.queue.expire);
+
+        let topics: Vec<String> = sub.bindings.iter().map(|b| b.topic.clone()).collect();
+        let exchange = sub.bindings.first().and_then(|b| b.exchange.as_deref()).unwrap_or("xpublic");
+        
+        self.moth.subscribe(&topics, exchange, &sub.queue.name).await?;
+        self.moth.start_consume().await?;
+        
+        Ok(())
+    }
+}
+
+impl MothPublisher {
+    pub async fn reconnect(&mut self) -> anyhow::Result<()> {
+        log::warn!("Reconnecting publisher to broker: {}", self.broker.redacted());
+        let _ = self.moth.close().await;
+        self.moth = MothFactory::new(&self.broker, false).await?;
+        Ok(())
+    }
 }
 
 pub struct SubscribeFlow {
@@ -80,7 +109,7 @@ impl SubscribeFlow {
                 self.publishers.push(Arc::new(Mutex::new(MothPublisher {
                     options,
                     moth,
-                    broker_url: cred.url.to_string(),
+                    broker,
                     exchanges: p_cfg.exchange.clone(),
                 })));
             }
@@ -114,7 +143,7 @@ impl SubscribeFlow {
         if consume {
             let new_consumer = Arc::new(Mutex::new(MothConsumer {
                 moth,
-                broker_url: cred.url.to_string(),
+                broker,
                 subscription_idx: idx,
             }));
 
@@ -274,6 +303,10 @@ impl Flow for SubscribeFlow {
         for consumer_mutex in &self.consumers {
             let mut consumer = consumer_mutex.lock().await;
             
+            if consumer.moth.is_closed() {
+                let _ = consumer.reconnect(self.config()).await;
+            }
+
             let mut count = 0;
             log::debug!("GATHER: starting to gather from consumer idx {}", consumer.subscription_idx);
             while total_gathered < batch_size && count < (batch_size / self.consumers.len()).max(1) {
@@ -292,7 +325,8 @@ impl Flow for SubscribeFlow {
                         break;
                     }
                     Ok(Err(e)) => {
-                        log::error!("GATHER: error from {}: {}", redact_url(&consumer.broker_url), e);
+                        log::error!("GATHER: error from {}: {}. Reconnecting...", redact_url(&consumer.broker.url.to_string()), e);
+                        let _ = consumer.reconnect(self.config()).await;
                         break;
                     }
                     Err(_) => {
@@ -324,32 +358,55 @@ impl Flow for SubscribeFlow {
             let mut consumer = consumer_mutex.lock().await;
             let idx_str = consumer.subscription_idx.to_string();
 
-            for m in &worklist.ok {
+            if consumer.moth.is_closed() {
+                log::warn!("ACK: connection closed for consumer {}. Reconnecting...", consumer.subscription_idx);
+                let _ = consumer.reconnect(self.config()).await;
+                // Note: old delivery tags are invalid after reconnect.
+            }
+
+            for m in &mut worklist.ok {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
-                        let _ = consumer.moth.ack(ack_id).await;
+                        if !consumer.moth.is_closed() {
+                            if let Err(e) = consumer.moth.ack(ack_id).await {
+                                log::warn!("ACK: failed for {}: {}", ack_id, e);
+                                if consumer.moth.is_closed() { break; }
+                            }
+                        }
+                        m.ack_id=None;
                     }
                 }
             }
             
-            for m in &worklist.rejected {
+            for m in &mut worklist.rejected {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
-                        let _ = consumer.moth.ack(ack_id).await;
+                        if !consumer.moth.is_closed() {
+                            if let Err(e) = consumer.moth.ack(ack_id).await {
+                                log::warn!("ACK (rejected): failed for {}: {}", ack_id, e);
+                                if consumer.moth.is_closed() { break; }
+                            }
+                        }
+                        m.ack_id=None;
                     }
                 }
             }
 
-            for m in &worklist.failed {
+            for m in &mut worklist.failed {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
-                        // If _isRetry is present, it means RetryPlugin handled it (either persisted or gave up)
-                        // In both cases, we should ACK it to the broker so it's not re-delivered.
-                        if m.delete_on_post.contains_key("_isRetry") {
-                            let _ = consumer.moth.ack(ack_id).await;
-                        } else {
-                            let _ = consumer.moth.nack(ack_id).await;
+                        if !consumer.moth.is_closed() {
+                            let res = if m.delete_on_post.contains_key("_isRetry") {
+                                consumer.moth.ack(ack_id).await
+                            } else {
+                                consumer.moth.nack(ack_id).await
+                            };
+                            if let Err(e) = res {
+                                log::warn!("ACK/NACK (failed): failed for {}: {}", ack_id, e);
+                                if consumer.moth.is_closed() { break; }
+                            }
                         }
+                        m.ack_id=None;
                     }
                 }
             }
@@ -381,8 +438,17 @@ impl Flow for SubscribeFlow {
 
 impl MothPublisher {
     pub async fn publish_mut(&mut self, msg: &Message) -> anyhow::Result<()> {
-        for exchange in &self.exchanges {
-            self.moth.publish(exchange, "", msg, &self.options).await?;
+        if self.moth.is_closed() {
+            let _ = self.reconnect().await;
+        }
+
+        let exchanges = self.exchanges.clone();
+        for exchange in exchanges {
+            if let Err(e) = self.moth.publish(&exchange, "", msg, &self.options).await {
+                log::error!("Publish failed: {}. Attempting reconnect...", e);
+                self.reconnect().await?;
+                self.moth.publish(&exchange, "", msg, &self.options).await?;
+            }
         }
         Ok(())
     }

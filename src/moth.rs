@@ -43,6 +43,9 @@ pub trait Moth: Send + Sync {
 
     /// Close connection
     async fn close(&mut self) -> Result<()>;
+
+    /// Check if connection/channel is closed
+    fn is_closed(&self) -> bool;
 }
 
 pub struct MothFactory;

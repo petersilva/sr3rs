@@ -67,7 +67,7 @@ impl SenderFlow {
                 self.publishers.push(Arc::new(Mutex::new(MothPublisher {
                     options,
                     moth,
-                    broker_url: cred.url.to_string(),
+                    broker,
                     exchanges: p_cfg.exchange.clone(),
                 })));
             }
@@ -99,7 +99,7 @@ impl SenderFlow {
         if consume {
             let new_consumer = Arc::new(Mutex::new(MothConsumer {
                 moth,
-                broker_url: cred.url.to_string(),
+                broker,
                 subscription_idx: idx,
             }));
 
@@ -259,6 +259,10 @@ impl Flow for SenderFlow {
         for consumer_mutex in &self.consumers {
             let mut consumer = consumer_mutex.lock().await;
             
+            if consumer.moth.is_closed() {
+                let _ = consumer.reconnect(self.config()).await;
+            }
+
             let mut count = 0;
             while total_gathered < batch_size && count < (batch_size / self.consumers.len()).max(1) {
                 match tokio::time::timeout(tokio::time::Duration::from_millis(500), consumer.moth.consume()).await {
@@ -270,7 +274,8 @@ impl Flow for SenderFlow {
                     }
                     Ok(Ok(None)) => break,
                     Ok(Err(e)) => {
-                        log::error!("GATHER: error from {}: {}", redact_url(&consumer.broker_url), e);
+                        log::error!("GATHER: error from {}: {}. Reconnecting...", redact_url(&consumer.broker.url.to_string()), e);
+                        let _ = consumer.reconnect(self.config()).await;
                         break;
                     }
                     Err(_) => break, // Timeout
@@ -402,37 +407,58 @@ impl Flow for SenderFlow {
     }
 
     async fn ack(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
-        // Reuse SubscribeFlow ack logic
         for consumer_mutex in &self.consumers {
             let mut consumer = consumer_mutex.lock().await;
             let idx_str = consumer.subscription_idx.to_string();
 
-            for m in &worklist.ok {
+            if consumer.moth.is_closed() {
+                log::warn!("ACK: connection closed for consumer {}. Reconnecting...", consumer.subscription_idx);
+                let _ = consumer.reconnect(self.config()).await;
+            }
+
+            for m in &mut worklist.ok {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
-                        let _ = consumer.moth.ack(ack_id).await;
+                        if !consumer.moth.is_closed() {
+                            if let Err(e) = consumer.moth.ack(ack_id).await {
+                                log::warn!("ACK: failed for {}: {}", ack_id, e);
+                                if consumer.moth.is_closed() { break; }
+                            }
+                        }
+                        m.ack_id=None;
                     }
                 }
             }
             
-            for m in &worklist.rejected {
+            for m in &mut worklist.rejected {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
-                        let _ = consumer.moth.ack(ack_id).await;
+                        if !consumer.moth.is_closed() {
+                            if let Err(e) = consumer.moth.ack(ack_id).await {
+                                log::warn!("ACK (rejected): failed for {}: {}", ack_id, e);
+                                if consumer.moth.is_closed() { break; }
+                            }
+                        }
+                        m.ack_id=None;
                     }
                 }
             }
 
-            for m in &worklist.failed {
+            for m in &mut worklist.failed {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
-                        // If _isRetry is present, it means RetryPlugin handled it (either persisted or gave up)
-                        // In both cases, we should ACK it to the broker so it's not re-delivered.
-                        if m.delete_on_post.contains_key("_isRetry") {
-                            let _ = consumer.moth.ack(ack_id).await;
-                        } else {
-                            let _ = consumer.moth.nack(ack_id).await;
+                        if !consumer.moth.is_closed() {
+                            let res = if m.delete_on_post.contains_key("_isRetry") {
+                                consumer.moth.ack(ack_id).await
+                            } else {
+                                consumer.moth.nack(ack_id).await
+                            };
+                            if let Err(e) = res {
+                                log::warn!("ACK/NACK (failed): failed for {}: {}", ack_id, e);
+                                if consumer.moth.is_closed() { break; }
+                            }
                         }
+                        m.ack_id=None;
                     }
                 }
             }

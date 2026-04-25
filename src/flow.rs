@@ -446,7 +446,7 @@ pub trait Flow: Send + Sync {
                 self.message_adjust_post( &mut m_copy, &self.config().publishers[idx] );
                 let mut p = pub_mutex.lock().await;
                 if let Err(e) = p.publish_mut(&m_copy).await {
-                    ::log::error!("POST: failed to publish to {}: {}", redact_url(&p.broker_url), e);
+                    ::log::error!("POST: failed to publish to {}: {}", redact_url(&p.broker.redacted()), e);
                     failed_indices.push(idx);
                 }
             }

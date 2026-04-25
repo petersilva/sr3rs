@@ -41,4 +41,7 @@ impl Moth for Amqp1 {
     async fn close(&mut self) -> Result<()> {
         Ok(())
     }
+    fn is_closed(&self) -> bool {
+        false
+    }
 }
