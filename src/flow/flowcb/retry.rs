@@ -64,7 +64,7 @@ impl SimpleDiskQueue {
         }
         // Write to temp file then rename for atomic write
         let tmp_path = self.path.with_extension("tmp");
-        if let Ok(content) = serde_json::to_string(&self.queue) {
+        if let Ok(content) = serde_json::to_string_pretty(&self.queue) {
             if std::fs::write(&tmp_path, content).is_ok() {
                 let _ = std::fs::rename(tmp_path, &self.path);
             }

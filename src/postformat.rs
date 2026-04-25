@@ -74,7 +74,7 @@ pub fn topic_derive(msg: &Message, options: &serde_json::Value) -> Vec<String> {
                 for part in &parts[0..parts.len() - 2] {
                     topic.push((*part).to_string());
                 }
-                ::log::error!(" normal topic derivation path: {:?}", topic );
+                //::log::info!(" normal topic derivation path: {:?}", topic );
             }
         } else if let Some(subtopic) = msg.delete_on_post.get("subtopic") {
             let parts: Vec<&str> = subtopic.split('.').collect();
