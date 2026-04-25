@@ -107,11 +107,11 @@ Just a place holder for now.
 
 All of the following documentation refers to the python version (to be gradually replaced:):
 
+## English
+
 [ homepage (En): https://metpx.github.io/sarracenia ] [ `(Fr) fr/ <https://metpx.github.io/sarracenia/fr>`_ ]
 
 [ `Getting Started <https://metpx.github.io/sarracenia/How2Guides/subscriber.html>`_ ] [ `Source Guide <https://metpx.github.io/sarracenia/How2Guides/source.html>`_ ] 
-
-[ `Un bon départ <https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>`_ ] [ `Guide de Source <https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>`_ ]
 
 
 MetPX-sr3 (Sarracenia v3) is a data duplication
@@ -124,6 +124,10 @@ Data sources establish a directory structure
 which is carried through any number of
 intervening pumps until they arrive at a
 client.
+
+## Français
+
+[ `Un bon départ <https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>`_ ] [ `Guide de Source <https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>`_ ]
 
 MetPX-sr3 (Sarracenia v3) est un engin de copie et de
 distribution de données qui utilise des
