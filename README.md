@@ -109,23 +109,64 @@ All of the following documentation refers to the python version (to be gradually
 
 [ homepage (En): https://metpx.github.io/sarracenia ] [ `(Fr) fr/ <https://metpx.github.io/sarracenia/fr>`_ ]
 
-| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-|                                                                                        |                                                                                           |
-| [ `Getting Started <https://metpx.github.io/sarracenia/How2Guides/subscriber.html>`_ ] | [ `Un bon départ <https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>`_ ] |
-| [ `Source Guide <https://metpx.github.io/sarracenia/How2Guides/source.html>`_ ]        | [ `Guide de Source <https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>`_ ]   |
-|                                                                                        |                                                                                           |
-| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-|                                                                                        |                                                                                           |
-| MetPX-sr3 (Sarracenia v3) is a data duplication                                        | MetPX-sr3 (Sarracenia v3) est un engin de copie et de                                     |
-| or distribution pump that leverages                                                    | distribution de données qui utilise des                                                   |
-| existing standard technologies (web                                                    | technologies standards (tel que les services                                              |
-| servers and Message queueing protocol                                                  | web et le courtier de messages AMQP) afin                                                 |
-| brokers) to achieve real-time message delivery                                         | d'effectuer des transferts de données en                                                  |
-| and end-to-end transparency in file transfers.                                         | temps réel tout en permettant une transparence                                            |
-| Data sources establish a directory structure                                           | de bout en bout. Alors que chaque commutateur                                             |
-| which is carried through any number of                                                 | Sundew est unique en soit, offrant des                                                    |
-| intervening pumps until they arrive at a                                               | configurations sur mesure et permutations de                                              |
-| client.                                                                                | données multiples, Sarracenia cherche à                                                   |
-|                                                                                        | maintenir l'intégrité de la structure des                                                 |
-|                                                                                        | données, tel que proposée et organisée par la                                             |
-|                                                                                        | source jusqu'à destination.                                                               |
+<div class="two-column-grid">
+   <div class="column">
+ [ `Getting Started <https://metpx.github.io/sarracenia/How2Guides/subscriber.html>`_ ] 
+ [ `Source Guide <https://metpx.github.io/sarracenia/How2Guides/source.html>`_ ] 
+   </div>
+   <div class="column">
+ [ `Un bon départ <https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>`_ ]
+ [ `Guide de Source <https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>`_ ] 
+   </div>
+</div>
+
+<div class="two-column-grid">
+<div class="column">
+MetPX-sr3 (Sarracenia v3) is a data duplication                                        
+or distribution pump that leverages                                                    
+existing standard technologies (web                                                    
+servers and Message queueing protocol                                                  
+brokers) to achieve real-time message delivery                                         
+and end-to-end transparency in file transfers.                                         
+Data sources establish a directory structure                                           
+which is carried through any number of                                                 
+intervening pumps until they arrive at a                                               
+client.                                                                                | 
+</div>
+<div class="column">
+MetPX-sr3 (Sarracenia v3) est un engin de copie et de                                     |
+distribution de données qui utilise des                                                   |
+technologies standards (tel que les services                                              |
+web et le courtier de messages AMQP) afin                                                 |
+d'effectuer des transferts de données en                                                  |
+temps réel tout en permettant une transparence                                            |
+de bout en bout. Alors que chaque commutateur                                             |
+Sundew est unique en soit, offrant des                                                    |
+configurations sur mesure et permutations de                                              |
+données multiples, Sarracenia cherche à
+maintenir l'intégrité de la structure des
+données, tel que proposée et organisée par la
+source jusqu'à destination.
+</div>
+</div>
+
+
+<style>
+.two-column-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  margin: 20px 0;
+}
+
+.column {
+  padding: 0;
+}
+
+@media (max-width: 768px) {
+  .two-column-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+</style>
