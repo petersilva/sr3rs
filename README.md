@@ -27,7 +27,7 @@ This is a proof of concept for now.
 * Rust version:
    * There is a GUI? really? there is!
    * There is a web ui too... it's the same as the GUI.
-   * is completely async, heavily based on tokio. 
+   * is completely async, heavily based on tokio.
    * was researched to be idiomatic rust, and use rust conventions.
      * internal vars do not use camel_case for example.
    * does directory tree walks properly 1 batch at a time... python walks the whole tree in one shot.
@@ -109,21 +109,22 @@ All of the following documentation refers to the python version (to be gradually
 
 [ homepage (En): https://metpx.github.io/sarracenia ] [ `(Fr) fr/ <https://metpx.github.io/sarracenia/fr>`_ ]
 
-|--|--|
-| [ `Getting Started <https://metpx.github.io/sarracenia/How2Guides/subscriber.html>`_ ] <p> [ `Source Guide <https://metpx.github.io/sarracenia/How2Guides/source.html>`_ ] | [ `Un bon départ <https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>`_ ] <p> [ `Guide de Source <https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>`_ ] |
+[ `Getting Started <https://metpx.github.io/sarracenia/How2Guides/subscriber.html>`_ ] [ `Source Guide <https://metpx.github.io/sarracenia/How2Guides/source.html>`_ ] 
 
-|--|--|| ```
-MetPX-sr3 (Sarracenia v3) is a data duplication                                        
-or distribution pump that leverages                                                    
-existing standard technologies (web                                                    
-servers and Message queueing protocol                                                  
-brokers) to achieve real-time message delivery                                         
-and end-to-end transparency in file transfers.                                         
-Data sources establish a directory structure                                           
-which is carried through any number of                                                 
-intervening pumps until they arrive at a                                               
+[ `Un bon départ <https://metpx.github.io/sarracenia/fr/CommentFaire/subscriber.html>`_ ] [ `Guide de Source <https://metpx.github.io/sarracenia/fr/CommentFaire/source.html>`_ ]
+
+
+MetPX-sr3 (Sarracenia v3) is a data duplication
+or distribution pump that leverages
+existing standard technologies (web
+servers and Message queueing protocol
+brokers) to achieve real-time message delivery
+and end-to-end transparency in file transfers.
+Data sources establish a directory structure
+which is carried through any number of
+intervening pumps until they arrive at a
 client.
-``` | ```
+
 MetPX-sr3 (Sarracenia v3) est un engin de copie et de
 distribution de données qui utilise des
 technologies standards (tel que les services
@@ -137,4 +138,3 @@ données multiples, Sarracenia cherche à
 maintenir l'intégrité de la structure des
 données, tel que proposée et organisée par la
 source jusqu'à destination.
-``` |
