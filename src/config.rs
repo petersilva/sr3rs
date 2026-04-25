@@ -998,7 +998,6 @@ impl Config {
                 }
             }
             let mut publ = Publisher::new(Some(cred), exchanges, topic_prefix, format);
-            log::error!("parse_publisher: post_base_dir:: {:?}", self.post_base_dir);
             publ.base_dir = self.post_base_dir.clone();
             publ.base_url = self.post_base_url.clone();
 
