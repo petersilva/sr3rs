@@ -1185,7 +1185,7 @@ impl Config {
 
         if self.component == "poll" {
             if !self.vip.is_empty() && self.broker.is_none() && self.post_broker.is_some() {
-                log::info!("POLL/VIP: setting loopback subscription to post_broker for cache warming.");
+                log::info!("POLL/VIP: setting loopback subscription to post_broker for cache warming." );
                 self.broker = self.post_broker.clone();
             }
 

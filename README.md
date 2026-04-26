@@ -16,8 +16,7 @@ This is a proof of concept for now.
    * All components, rudimentarily.  testing with static flow for now.
      * post, subscribe and sarra seem to work fine.
      * watch loses a percentage of posts, so not really.
-     * sender... I'm confused about it.  paths are wrong.
-   * the messages themselves are all wrong... don't try any interop tests. they work with each other for now.
+     * sender... that's works now... forced paths to absolute.
    * All of the configuration options that are implemented, should do the same thing they do in python.
    * options that have not yet had use cases, are not implemented yet.
    * it is kind of essentialist... things needed to run certain use cases are implemented, but many options/details missing.
@@ -43,6 +42,8 @@ This should install compiled binaries in ~/.cargo/bin:
 
 ```shell
 
+   % git clone https://github.com/petersilva/sr3rs.git
+   % cd sr3rs
    % install_path=`pwd`
    % cargo install --path=${install_path}
 
@@ -57,8 +58,9 @@ If you are on linux or perhaps WSL, the local ui might work. to  try it out:
 
 ```shell
 
-   # git clone..
-   cargo run view
+   % git clone https://github.com/petersilva/sr3rs.git
+   % cd sr3rs
+   % cargo run view
 
 ```
 That should start up the GUI, looking at the default location for the configuration tree: ~/.config/sr3rs.
@@ -73,7 +75,7 @@ when it isn't in the normal place (eg. ~/sr_config/ddsr ) so there is a  *config
 
 ```
 
-sr3rs_view --configDir=~/sr_config/ddsr
+  % sr3rs_view --configDir=~/sr_config/ddsr
 
 
 ```
@@ -92,11 +94,12 @@ Note: there is no security on the web ui... so do this only where it is reasonab
 
 ```shell
 
-# clone the source repo.
-trunk build
-cargo run webui --port=8080 --configTree=~/.config/sr3rs
+   # clone the source repo.
+   % trunk build
+   % cargo run webui --port=8080 --configTree=~/.config/sr3rs
 
 ```
+
 open a browser window for localhost:8080
 
 
