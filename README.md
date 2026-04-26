@@ -93,6 +93,9 @@ so a persistent arrangement of the boxes is kept.
 
 ### To run the Web UI
 
+It should work exactly the same as the native UI, but I mostly use the native one, so
+bugs more likely to be seen here.
+
 Note: there is no security on the web ui... so do this only where it is reasonably safe.
 
 ```shell
