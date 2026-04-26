@@ -56,7 +56,7 @@ The main entry point is *sr3rs*, but just like the python version, there is also
 
 If you are on linux or perhaps WSL, the local ui might work. to  try it out:
 
-![gui snapshot](docs/gui_snapshot.jpg)
+![A snapshot of the GUI with the static flow configurations](docs/gui_snapshot.png)
 
 
 ```shell
