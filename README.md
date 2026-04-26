@@ -56,6 +56,9 @@ The main entry point is *sr3rs*, but just like the python version, there is also
 
 If you are on linux or perhaps WSL, the local ui might work. to  try it out:
 
+![gui snapshot](docs/gui_snapshot.jpg)
+
+
 ```shell
 
    % git clone https://github.com/petersilva/sr3rs.git
