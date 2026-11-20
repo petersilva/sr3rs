@@ -7,6 +7,12 @@ use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::fs;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Report {
+    pub code: u16,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
@@ -19,6 +25,9 @@ pub struct Message {
     pub identity: HashMap<String, String>,
 
     pub file_operation: HashMap<String, String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<Report>,
 
     #[serde(flatten)]
     pub delete_on_post: HashMap<String, String>,
@@ -41,9 +50,42 @@ impl Message {
             fields: HashMap::new(),
             identity: HashMap::new(),
             file_operation: HashMap::new(),
+            report: None,
             delete_on_post: HashMap::new(),
             ack_id: None,
         }
+    }
+
+    pub fn set_report(&mut self, code: u16, message: impl Into<String>) {
+        let msg_str = message.into();
+        self.delete_on_post.insert("reject".to_string(), msg_str.clone());
+        self.report = Some(Report {
+            code,
+            message: msg_str,
+        });
+    }
+
+    pub fn get_id_str(&self) -> String {
+        let mut s = String::new();
+        if !self.base_url.is_empty() {
+            s.push_str(&self.base_url);
+        } else {
+            s.push_str("baseUrl missing ");
+        }
+        if !self.rel_path.is_empty() {
+            if !self.rel_path.starts_with('/') && !s.is_empty() && !s.ends_with('/') {
+                s.push('/');
+            }
+            s.push_str(&self.rel_path);
+        } else if let Some(ret_path) = self.fields.get("retrievePath") {
+            if !ret_path.starts_with('/') && !s.is_empty() && !s.ends_with('/') {
+                s.push('/');
+            }
+            s.push_str(ret_path);
+        } else {
+            s.push_str("badMessage");
+        }
+        s
     }
 
     #[cfg(not(target_arch = "wasm32"))]

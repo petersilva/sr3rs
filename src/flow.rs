@@ -114,13 +114,11 @@ pub trait Flow: Send + Sync {
 
         ::log::info!("initial dest_dir: {:?} mirror: {:?}, rel_path: {:?}", dest_dir, mirror, rel_path);
 
-        let new_rel_path = rel_path.strip_prefix(&dest_dir);
-        if new_rel_path != None {
-
-            msg.rel_path = new_rel_path.unwrap().to_string();
+        let clean_rel = rel_path.trim_start_matches('/');
+        let clean_dest = dest_dir.trim_start_matches('/');
+        if let Some(new_rel) = clean_rel.strip_prefix(clean_dest) {
+            msg.rel_path = new_rel.trim_start_matches('/').to_string();
             rel_path = msg.rel_path.clone();
-            // FIXME: adjust base_url if it is a file: ? 
-            // msg.base_url?
         } 
  
         let mut new_dir = dest_dir.clone();
@@ -141,7 +139,7 @@ pub trait Flow: Send + Sync {
                 new_dir = dir_parts;
             }
         }
-        msg.delete_on_post.insert("new_dir".to_string(), new_dir.clone());
+        msg.delete_on_post.insert("new_dir".to_string(), new_dir.trim_end_matches('/').to_string());
         msg.delete_on_post.insert("new_file".to_string(), filename.to_string());
 
 
@@ -184,6 +182,7 @@ pub trait Flow: Send + Sync {
                     }
                     filtered_incoming.push(msg);
                 } else {
+                    msg.set_report(404, format!("reject mask {}", mask.pattern));
                     worklist.rejected.push(msg);
                     rejected_count += 1;
                 }
@@ -196,7 +195,9 @@ pub trait Flow: Send + Sync {
                 }
                 filtered_incoming.push(msg);
             } else {
-                worklist.rejected.push(m);
+                let mut msg = m;
+                msg.set_report(404, format!("unmatched pattern {}", url_to_match));
+                worklist.rejected.push(msg);
                 rejected_count += 1;
             }
         }
@@ -226,6 +227,11 @@ pub trait Flow: Send + Sync {
             let mut logger = logger_arc.lock().await;
             logger.after_accept(config, worklist);
         }
+
+        if !worklist.rejected.is_empty() {
+            self.ack(worklist).await?;
+            worklist.rejected.clear();
+        }
         Ok(())
     }
 
@@ -253,6 +259,7 @@ pub trait Flow: Send + Sync {
 
         let mut ok_count = 0;
         let mut failed_count = 0;
+        let mut rejected_count = 0;
         let mut bytes_in = 0;
 
         for mut m in worklist.incoming.drain(..) {
@@ -333,6 +340,26 @@ pub trait Flow: Send + Sync {
                     continue;
                 }
 
+                if local_file.is_file() {
+                    if let (Some(method), Some(remote_val)) = (m.identity.get("method"), m.identity.get("value")) {
+                        if method != "cod" && method != "random" {
+                            if let Some(mut id_obj) = crate::identity::factory(method) {
+                                if id_obj.update_file(local_file.to_str().unwrap_or("")).is_ok() {
+                                    let local_val = id_obj.value();
+                                    if &local_val == remote_val {
+                                        let reason = format!("same checksum {}", local_file.display());
+                                        ::log::info!("WORK: file {} already exists with same checksum, rejecting download", local_file.display());
+                                        m.set_report(304, reason);
+                                        worklist.rejected.push(m);
+                                        rejected_count += 1;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 match transfer.get(&m, &local_file).await {
                     Ok(size) => {
                         ::log::info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
@@ -359,6 +386,7 @@ pub trait Flow: Send + Sync {
             let mut metrics = metrics_arc.lock().await;
             metrics.flow.msg_count_out += ok_count;
             metrics.flow.msg_count_failed += failed_count;
+            metrics.flow.msg_count_rejected += rejected_count;
             metrics.flow.byte_count_in += bytes_in;
         }
 
@@ -821,7 +849,7 @@ mod tests {
 
         assert_eq!(wl.incoming.len(), 1);
         assert_eq!(wl.incoming[0].rel_path, "accept_me.txt");
-        assert_eq!(wl.rejected.len(), 2);
+        assert_eq!(wl.rejected.len(), 0);
     }
  
     #[test] 
@@ -862,6 +890,37 @@ mod tests {
        assert_eq!(m.delete_on_post.get("new_dir").unwrap().to_string(), "/home/peter/sarra_devdocroot/downloaded_by_sub_amqp/20200105/WXO-DD/bulletins/alphanumeric/20200105/SX/KWAL/03" );
        assert_eq!(m.delete_on_post.get("new_file").unwrap().to_string(), "SXCN40_KWAL_050300___47957".to_string() );
     }
-     
+
+    #[tokio::test]
+    async fn test_work_checksum_rejection() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("existing.txt");
+        std::fs::write(&file_path, "hello world").unwrap();
+
+        // Calculate identity of the existing file using sha512
+        let mut id_obj = crate::identity::factory("sha512").unwrap();
+        id_obj.update_file(file_path.to_str().unwrap()).unwrap();
+        let checksum = id_obj.value();
+
+        let mut config = Config::new();
+        config.download = true;
+        config.directory = dir.path().to_path_buf();
+
+        let flow = BaseFlow::new(config);
+        let mut wl = Worklist::new();
+        let mut msg = Message::new("file:/tmp/", "existing.txt");
+        msg.identity.insert("method".to_string(), "sha512".to_string());
+        msg.identity.insert("value".to_string(), checksum);
+        wl.incoming.push(msg);
+
+        flow.work(&mut wl).await.unwrap();
+
+        assert_eq!(wl.incoming.len(), 0);
+        assert_eq!(wl.rejected.len(), 1);
+        let rep = wl.rejected[0].report.as_ref().unwrap();
+        assert_eq!(rep.code, 304);
+        assert!(rep.message.contains("same checksum"));
+    }
 }
   

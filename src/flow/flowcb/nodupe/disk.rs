@@ -256,11 +256,11 @@ impl FlowCB for DiskNoDupePlugin {
             if let Some(mtime_str) = m.fields.get("mtime") {
                 if let Ok(mtime) = mtime_str.parse::<f64>() {
                     if mtime < min_mtime {
-                        m.delete_on_post.insert("reject".to_string(), format!("{} too old (nodupe check)", mtime));
+                        m.set_report(406, format!("{} too old (nodupe check)", mtime));
                         wl.rejected.push(m);
                         continue;
                     } else if mtime > max_mtime {
-                        m.delete_on_post.insert("reject".to_string(), format!("{} too new (nodupe check)", mtime));
+                        m.set_report(425, format!("{} too new (nodupe check)", mtime));
                         wl.rejected.push(m);
                         continue;
                     }
@@ -278,7 +278,7 @@ impl FlowCB for DiskNoDupePlugin {
             if is_retry || Self::not_in_cache(&mut state, &key, &path, now) {
                 new_incoming.push(m);
             } else {
-                m.delete_on_post.insert("reject".to_string(), "not modified 1 (nodupe check)".to_string());
+                m.set_report(304, "Not modified 1 (nodupe check)");
                 wl.rejected.push(m);
             }
         }

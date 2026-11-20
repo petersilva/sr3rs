@@ -6,6 +6,7 @@
 use crate::flow::Worklist;
 use crate::flow::flowcb::FlowCB;
 use crate::Config;
+use crate::config::is_true;
 use crate::message::Message;
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -49,14 +50,39 @@ impl LogPlugin {
         };
 
         let mut log_events = HashSet::new();
+        // Defaults from Python implementation
+        log_events.insert("after_accept".to_string());
+        log_events.insert("after_work".to_string());
+        log_events.insert("after_post".to_string());
+        log_events.insert("on_housekeeping".to_string());
+
         if let Some(events_str) = config.options.get("logEvents") {
             for e in events_str.split(',') {
-                log_events.insert(e.trim().to_string());
+                let trimmed = e.trim();
+                if let Some(item) = trimmed.strip_prefix('+') {
+                    log_events.insert(item.trim().to_string());
+                } else if let Some(item) = trimmed.strip_prefix('-') {
+                    log_events.remove(item.trim());
+                } else if !trimmed.is_empty() {
+                    log_events.insert(trimmed.to_string());
+                }
             }
-        } else {
-            // Defaults from Python implementation
-            log_events.insert("after_accept".to_string());
-            log_events.insert("on_housekeeping".to_string());
+        }
+
+        let log_reject = config.log_reject
+            || config.options.get("logReject").map(|v| is_true(v)).unwrap_or(false)
+            || config.options.get("log_reject").map(|v| is_true(v)).unwrap_or(false);
+
+        if log_reject {
+            log_events.insert("reject".to_string());
+        }
+
+        let log_duplicates = config.options.get("logDuplicates").map(|v| is_true(v)).unwrap_or(false)
+            || config.nodupe_ttl > 0
+            || config.flow_callbacks.iter().any(|c| c == "nodupe" || c.starts_with("nodupe."));
+
+        if log_duplicates {
+            log_events.insert("nodupe".to_string());
         }
 
         let log_message_dump = config.options.get("logMessageDump")
@@ -171,7 +197,21 @@ impl FlowCB for LogPlugin {
 
         if self.log_events.contains("reject") {
             for msg in &worklist.rejected {
-                log::info!("rejected: {}", self.message_accept_str(msg));
+                if let Some(ref rep) = msg.report {
+                    log::info!("rejected: {} ({}: {})", self.message_accept_str(msg).trim_end(), rep.code, rep.message);
+                } else if let Some(reject_reason) = msg.delete_on_post.get("reject") {
+                    log::info!("rejected: {} ({})", self.message_accept_str(msg).trim_end(), reject_reason);
+                } else {
+                    log::info!("rejected: {}", self.message_accept_str(msg));
+                }
+            }
+        } else if self.log_events.contains("nodupe") {
+            for msg in &worklist.rejected {
+                if let Some(ref rep) = msg.report {
+                    if rep.code == 304 {
+                        log::info!("{} rejected: {} {}", msg.get_id_str(), rep.code, rep.message);
+                    }
+                }
             }
         }
 
@@ -192,10 +232,25 @@ impl FlowCB for LogPlugin {
     async fn after_work(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let mut state = self.state.lock().unwrap();
         state.transfer_count += worklist.ok.len() as u64;
+        state.reject_count += worklist.rejected.len() as u64;
         
         if self.log_events.contains("reject") {
             for msg in &worklist.rejected {
-                log::info!("rejected: {}", self.message_str(msg));
+                if let Some(ref rep) = msg.report {
+                    log::info!("rejected: {} ({}: {})", self.message_str(msg).trim_end(), rep.code, rep.message);
+                } else if let Some(reject_reason) = msg.delete_on_post.get("reject") {
+                    log::info!("rejected: {} ({})", self.message_str(msg).trim_end(), reject_reason);
+                } else {
+                    log::info!("rejected: {}", self.message_str(msg));
+                }
+            }
+        } else if self.log_events.contains("nodupe") {
+            for msg in &worklist.rejected {
+                if let Some(ref rep) = msg.report {
+                    if rep.code == 304 {
+                        log::info!("{} rejected: {} {}", msg.get_id_str(), rep.code, rep.message);
+                    }
+                }
             }
         }
 
@@ -229,3 +284,61 @@ impl FlowCB for LogPlugin {
         m
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_log_plugin_reject() {
+        let mut config = Config::default();
+        config.parse_string("log_reject on", "test.conf").unwrap();
+
+        let plugin = LogPlugin::new(&config);
+        let mut wl = Worklist::new();
+        let mut msg = Message::new("http://localhost/", "rejected_file.txt");
+        msg.set_report(304, "Not modified 1 (nodupe check)");
+        wl.rejected.push(msg);
+
+        plugin.after_accept(&mut wl).await.unwrap();
+
+        let state = plugin.state.lock().unwrap();
+        assert_eq!(state.reject_count, 1);
+        assert_eq!(wl.rejected[0].report.as_ref().unwrap().code, 304);
+        assert_eq!(wl.rejected[0].report.as_ref().unwrap().message, "Not modified 1 (nodupe check)");
+    }
+
+    #[tokio::test]
+    async fn test_log_plugin_plus_prefix() {
+        let mut config = Config::default();
+        config.parse_string("logEvents +after_accept", "test.conf").unwrap();
+        config.parse_string("log_reject on", "test.conf").unwrap();
+
+        let plugin = LogPlugin::new(&config);
+        assert!(plugin.log_events.contains("after_accept"));
+        assert!(plugin.log_events.contains("on_housekeeping"));
+        assert!(plugin.log_events.contains("reject"));
+    }
+
+    #[tokio::test]
+    async fn test_log_plugin_nodupe_304() {
+        let mut config = Config::default();
+        config.nodupe_ttl = 1200;
+        config.flow_callbacks.push("nodupe".to_string());
+
+        let plugin = LogPlugin::new(&config);
+        assert!(plugin.log_events.contains("nodupe"));
+
+        let mut wl = Worklist::new();
+        let mut msg = Message::new("http://localhost:8001/", "20261119/file.txt");
+        msg.set_report(304, "Not modified 1 (nodupe check)");
+        wl.rejected.push(msg);
+
+        plugin.after_accept(&mut wl).await.unwrap();
+
+        let state = plugin.state.lock().unwrap();
+        assert_eq!(state.reject_count, 1);
+        assert_eq!(wl.rejected[0].get_id_str(), "http://localhost:8001/20261119/file.txt");
+    }
+}
+

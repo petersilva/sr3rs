@@ -101,6 +101,7 @@ pub struct Config {
     pub batch: u32,
     pub delete: bool,
     pub dry_run: bool,
+    pub log_reject: bool,
     pub nodupe_ttl: u32,
     pub file_age_min: f64,
     pub file_age_max: f64,
@@ -196,6 +197,7 @@ impl Default for Config {
             batch: 100,
             delete: false,
             dry_run: false,
+            log_reject: false,
             nodupe_ttl: 0,
             file_age_min: 0.0,
             file_age_max: 0.0,
@@ -333,21 +335,25 @@ impl Config {
                 self.flow_callbacks.push("scheduled".to_string());
                 self.flow_callbacks.push("poll".to_string());
                 self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
             "subscribe" => {
                 self.download = true;
                 self.mirror = false;
                 self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
             "sarra" => {
                 self.download = true;
                 self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
             "sender" => {
                 self.download = true;
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
             "post" | "cpost" => {
@@ -364,15 +370,18 @@ impl Config {
                 self.sleep = 5.0;
                 self.flow_callbacks.push("nodupe".to_string());
                 self.flow_callbacks.push("file".to_string());
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
             "shovel" | "cpump" | "report"  => {
                 self.download = false;
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
             "winnow" => {
                 self.nodupe_ttl = 300;
                 self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
             _ => {}
@@ -871,7 +880,15 @@ impl Config {
                     }
                     Ok(())
                 }
-                "set" | "logEvents" | "logMessageDump" | "logReject" | "events" | "fileEvents" | "retryEmptyBeforeExit" | "accelFtpgetCommand" | "accelFtpputCommand" | "mdelay" | "retry_refilter" | "inline" | "inline_max" | "plugin" | "flow_plugin" | "debug" | "sum" | "inflight" => {
+                "logReject" | "log_reject" => {
+                    let val_str = v.as_deref().unwrap_or("true");
+                    let flag = is_true(val_str);
+                    self.log_reject = flag;
+                    self.options.insert("logReject".to_string(), val_str.to_string());
+                    self.options.insert("log_reject".to_string(), val_str.to_string());
+                    Ok(())
+                }
+                "set" | "logEvents" | "logMessageDump" | "events" | "fileEvents" | "retryEmptyBeforeExit" | "accelFtpgetCommand" | "accelFtpputCommand" | "mdelay" | "retry_refilter" | "inline" | "inline_max" | "plugin" | "flow_plugin" | "debug" | "sum" | "inflight" => {
                     if let Some(ref val) = v {
                         self.options.insert(k.to_string(), val.to_string());
                     } else if k == "debug" {
@@ -1305,6 +1322,14 @@ impl Config {
             }
         }
 
+        if !self.flow_callbacks.iter().any(|c| c == "log" || c.ends_with(".Log")) {
+            if let Some(pos) = self.flow_callbacks.iter().position(|c| c == "retry") {
+                self.flow_callbacks.insert(pos, "log".to_string());
+            } else {
+                self.flow_callbacks.push("log".to_string());
+            }
+        }
+
         Ok(())
     }
 
@@ -1317,7 +1342,7 @@ impl Config {
     }
 }
 
-fn is_true(s: &str) -> bool {
+pub fn is_true(s: &str) -> bool {
     let s = s.to_lowercase();
     s == "true" || s == "yes" || s == "on" || s == "1"
 }

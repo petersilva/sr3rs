@@ -218,7 +218,9 @@ fn test_stable_rand() {
     
     // We need to set HOME so directories/paths uses it
     let old_home = std::env::var("HOME").ok();
+    let old_xdg = std::env::var("XDG_CACHE_HOME").ok();
     std::env::set_var("HOME", &home);
+    std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
 
     println!("Cache dir: {:?}", paths::get_user_cache_dir(None));
 
@@ -240,11 +242,16 @@ fn test_stable_rand() {
     assert_eq!(config2.rand4, r4);
     assert_eq!(config2.rand8, r8);
 
-    // Restore HOME
+    // Restore HOME and XDG_CACHE_HOME
     if let Some(h) = old_home {
         std::env::set_var("HOME", h);
     } else {
         std::env::remove_var("HOME");
+    }
+    if let Some(x) = old_xdg {
+        std::env::set_var("XDG_CACHE_HOME", x);
+    } else {
+        std::env::remove_var("XDG_CACHE_HOME");
     }
 }
 
@@ -255,7 +262,9 @@ fn test_subscriptions_persistence() {
     let home = dir.path().to_path_buf();
     
     let old_home = std::env::var("HOME").ok();
+    let old_xdg = std::env::var("XDG_CACHE_HOME").ok();
     std::env::set_var("HOME", &home);
+    std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
 
     let config_path = home.join("test.conf");
     std::fs::write(&config_path, "
@@ -289,6 +298,11 @@ fn test_subscriptions_persistence() {
         std::env::set_var("HOME", h);
     } else {
         std::env::remove_var("HOME");
+    }
+    if let Some(x) = old_xdg {
+        std::env::set_var("XDG_CACHE_HOME", x);
+    } else {
+        std::env::remove_var("XDG_CACHE_HOME");
     }
 }
 
@@ -369,3 +383,47 @@ fn test_post_base_dir_default_to_directory() {
     
     assert_eq!(config.post_base_dir, Some(PathBuf::from("/home/user/data")));
 }
+
+#[test]
+fn test_log_reject_option() {
+    use crate::flow::flowcb::log::LogPlugin;
+
+    let mut config = Config::default();
+    assert!(!config.log_reject);
+
+    // Test log_reject on (snake_case)
+    config.parse_string("log_reject on", "test.conf").unwrap();
+    assert!(config.log_reject);
+    assert_eq!(config.options.get("logReject"), Some(&"on".to_string()));
+    assert_eq!(config.options.get("log_reject"), Some(&"on".to_string()));
+
+    let log_plugin = LogPlugin::new(&config);
+    assert!(log_plugin.log_events.contains("reject"));
+
+    // Test logReject True (camelCase)
+    let mut config2 = Config::default();
+    config2.parse_string("logReject True", "test.conf").unwrap();
+    assert!(config2.log_reject);
+    assert_eq!(config2.options.get("logReject"), Some(&"True".to_string()));
+    assert_eq!(config2.options.get("log_reject"), Some(&"True".to_string()));
+
+    let log_plugin2 = LogPlugin::new(&config2);
+    assert!(log_plugin2.log_events.contains("reject"));
+
+    // Test log_reject alone (flag without argument)
+    let mut config3 = Config::default();
+    config3.parse_string("log_reject", "test.conf").unwrap();
+    assert!(config3.log_reject);
+
+    let log_plugin3 = LogPlugin::new(&config3);
+    assert!(log_plugin3.log_events.contains("reject"));
+
+    // Test log_reject off
+    let mut config4 = Config::default();
+    config4.parse_string("log_reject off", "test.conf").unwrap();
+    assert!(!config4.log_reject);
+
+    let log_plugin4 = LogPlugin::new(&config4);
+    assert!(!log_plugin4.log_events.contains("reject"));
+}
+

@@ -66,7 +66,7 @@ impl FlowCB for MDelayLatestPlugin {
 
             // Search for an existing message in the delay queue with the same rel_path
             if let Some(pos) = state.ok_delay.iter().position(|m2| m1.rel_path == m2.rel_path) {
-                let m2 = state.ok_delay.remove(pos);
+                let mut m2 = state.ok_delay.remove(pos);
 
                 // If it's a critical ordered operation (like rename, rm, mkdir), process it immediately
                 if m1.fields.contains_key("fileOp") || m2.fields.contains_key("fileOp") {
@@ -78,6 +78,7 @@ impl FlowCB for MDelayLatestPlugin {
                     // Suppress the older intermediate message
                     ::log::info!("intermediate version suppressed: {}", m1.rel_path);
                     state.suppressions += 1;
+                    m2.set_report(304, "intermediate version suppressed (mdelaylatest)");
                     wl.rejected.push(m2);
                     state.ok_delay.push(m1);
                 }
