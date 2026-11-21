@@ -62,32 +62,32 @@ If a python plugin sets such a field, it needs a mapping when calling it.
 
 Elements already addressed in the current implementation.
 
--- confirmed that amqp connections broken are recovered.
--- confirmed disk retry works (basically.)
--- host state dir... forget what the option is called.
--- GUI change config root, to work with other trees.
--- delete fields present in posted messages.
--- declare declare declare get three different queues.
--- exchanges declared properly.
--- remove password from log messages that post urls.
--- HA failover. vip config setting.
--- --users declare
--- only accepts one pattern, rather than a whole bunch of options.
--- poll?
--- watch.
--- watch/f40  baseUrl file:// but pathis 
--- download mirroring tree.
--- default value of mirror is true in all components except subscribe.
--- NEW/STOPPED subscriptions.json created
--- post of a directory posts whole tree.
--- enable and disable actions.
--- edit edit action.
--- de-duplication in subscriptions.json.
--- refactor to reproduce moth class with mqtt v5 support
--- add GPLv2 license.
--- flowcb plugin architecture. but for now, no dynamic ones.
+ * confirmed that amqp connections broken are recovered.
+ * confirmed disk retry works (basically.)
+ * host state dir... forget what the option is called.
+ * GUI change config root, to work with other trees.
+ * delete fields present in posted messages.
+ * declare declare declare get three different queues.
+ * exchanges declared properly.
+ * remove password from log messages that post urls.
+ * HA failover. vip config setting.
+ * --users declare
+ * only accepts one pattern, rather than a whole bunch of options.
+ * poll?
+ * watch.
+ * watch/f40  baseUrl file:// but pathis 
+ * download mirroring tree.
+ * default value of mirror is true in all components except subscribe.
+ * NEW/STOPPED subscriptions.json created
+ * post of a directory posts whole tree.
+ * enable and disable actions.
+ * edit edit action.
+ * de-duplication in subscriptions.json.
+ * refactor to reproduce moth class with mqtt v5 support
+ * add GPLv2 license.
+ * flowcb plugin architecture. but for now, no dynamic ones.
 
--- sr3rs view starts up a GUI with a canvas. On the canvas there are:
+ * sr3rs view starts up a GUI with a canvas. On the canvas there are:
     * a rectangle for each flow. A flow is defined by a file under ~/.config/sr3rs/<component>/<configuration>.conf and the sr3rs status command shows one flow per line of output. 
     * there would be green arrows between rectangles where one flow publishing to a broker and exchange that the other is subscribing to.
     * each rectangle would have its name inside it.
@@ -96,7 +96,7 @@ Elements already addressed in the current implementation.
 
 Dunno:
 
--- debug... don't have the per-module debugging logic. 
+ * debug... don't have the per-module debugging logic. 
 
 Notes:
 
