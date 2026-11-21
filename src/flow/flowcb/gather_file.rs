@@ -269,7 +269,7 @@ impl FlowCB for GatherFilePlugin {
                 match rx.try_recv() {
                     Ok(Ok(path)) => {
                         let base_dir=self.longest_base_dir(&path);
-                        if path.is_file() {
+                        if path.exists() {
                             if let Ok(msg) = self.make_message(&path,&base_dir) {
                                 worklist.incoming.push(msg);
                                 count += 1;
@@ -330,5 +330,32 @@ mod tests {
         let file_msg = messages.iter().find(|m| !m.file_operation.contains_key("directory"));
         assert!(file_msg.is_some());
         assert_eq!(file_msg.unwrap().rel_path, "sub_folder/test_file.txt");
+    }
+
+    #[tokio::test]
+    async fn test_gather_directory_event() {
+        let dir = tempdir().unwrap();
+        let base_dir = dir.path().to_path_buf();
+        let sub_dir = base_dir.join("created_dir");
+        fs::create_dir_all(&sub_dir).unwrap();
+
+        let mut config = Config::default();
+        config.directory = base_dir.clone();
+
+        let mut plugin = GatherFilePlugin::new(&config);
+        plugin.initial_scan_done = true;
+        plugin.primed = true;
+
+        let (tx, rx) = mpsc::channel(100);
+        tx.send(Ok(sub_dir.clone())).await.unwrap();
+        plugin.rx = Some(rx);
+
+        let mut worklist = Worklist::new();
+        plugin.gather(&mut worklist).await.unwrap();
+
+        assert_eq!(worklist.incoming.len(), 1);
+        let msg = &worklist.incoming[0];
+        assert!(msg.file_operation.contains_key("directory"));
+        assert_eq!(msg.rel_path, "created_dir");
     }
 }
