@@ -71,7 +71,11 @@ impl GatherFilePlugin {
             return messages;
         }
 
-        if dir != base_dir {
+        let is_root = fs::canonicalize(dir)
+            .and_then(|cd| fs::canonicalize(base_dir).map(|cb| cd == cb))
+            .unwrap_or_else(|_| dir == base_dir);
+
+        if !is_root {
             if let Ok(msg) = self.make_message(dir, base_dir) {
                 messages.push(msg);
             }
@@ -103,6 +107,10 @@ impl GatherFilePlugin {
         }
         let bd = base_dir;
         let msg = Message::from_file(path, &self.config, &bd)?;
+
+        if msg.file_operation.contains_key("directory") && msg.rel_path.is_empty() {
+            return Err(anyhow::anyhow!("Skipping root directory"));
+        }
 
         // Check age for regular files
         if let Ok(metadata) = fs::metadata(path) {
