@@ -226,6 +226,98 @@ async fn declare_rabbitmq_user(admin_broker: &sr3rs::broker::Broker, username: &
     Ok(())
 }
 
+async fn cleanup_config(config_file: &str) -> Option<PathBuf> {
+    let comp = detect_component(config_file);
+    let mut config = Config::new();
+    config.apply_component_defaults(&comp);
+    let config_loaded = config.load(config_file).is_ok() && config.finalize().is_ok();
+
+    let config_name = if config_loaded {
+        config.configname.clone()
+    } else {
+        std::path::Path::new(config_file)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+    };
+
+    let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref())
+        .join(&comp)
+        .join(config_name.as_deref().unwrap_or("unknown"));
+    let state_file = state_dir.join("instances_expected");
+    if state_file.exists() {
+        let _ = std::fs::remove_file(state_file);
+    }
+
+    let subscriptions_json = state_dir.join("subscriptions.json");
+    if subscriptions_json.exists() {
+        if let Err(e) = std::fs::remove_file(&subscriptions_json) {
+            log::error!("Failed to remove {}: {}", subscriptions_json.display(), e);
+        } else {
+            log::info!("Removed {}", subscriptions_json.display());
+        }
+    }
+
+    let dot_state_json = state_dir.join(".state.json");
+    if dot_state_json.exists() {
+        if let Err(e) = std::fs::remove_file(&dot_state_json) {
+            log::error!("Failed to remove {}: {}", dot_state_json.display(), e);
+        } else {
+            log::info!("Removed {}", dot_state_json.display());
+        }
+    }
+
+    let mut stopped_count = 0;
+    let instances = if config_loaded { config.instances } else { 1 };
+    for i in 1..=100 { 
+        let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i);
+        if pid_file.exists() {
+            if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = pid_str.parse::<i32>() {
+                    if is_process_running(pid) {
+                        unsafe { libc::kill(pid, libc::SIGTERM); }
+                        stopped_count += 1;
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(pid_file);
+        } else if i > instances {
+            break;
+        }
+    }
+    if stopped_count > 0 {
+        println!("Stopped {} instance(s) of {}.", stopped_count, config_file);
+    }
+
+    if config_loaded {
+        match comp.as_str() {
+            "sender" => {
+                let mut flow = SenderFlow::new(config);
+                if let Err(e) = flow.connect_full(false, false).await {
+                    log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
+                } else {
+                    if let Err(e) = flow.cleanup().await {
+                        log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
+                    }
+                    let _ = flow.shutdown().await;
+                }
+            }
+            _ => {
+                let mut flow = SubscribeFlow::new(config);
+                if let Err(e) = flow.connect_full(false, false).await {
+                    log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
+                } else {
+                    if let Err(e) = flow.cleanup().await {
+                        log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
+                    }
+                    let _ = flow.shutdown().await;
+                }
+            }
+        }
+    }
+
+    Some(state_dir)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -684,90 +776,7 @@ async fn main() -> Result<()> {
             }
 
             for config_file in configs {
-                let comp = detect_component(&config_file);
-                let mut config = Config::new();
-                config.apply_component_defaults(&comp);
-                if let Err(e) = config.load(&config_file) {
-                    log::error!("Failed to load {}: {}", config_file, e);
-                    continue;
-                }
-                if let Err(e) = config.finalize() {
-                    log::error!("Failed to finalize {}: {}", config_file, e);
-                    continue;
-                }
-
-                // First stop any running instances
-                let config_name = config.configname.as_deref();
-                let state_dir = paths::get_user_cache_dir(config.host_dir.as_deref()).join(&comp).join(config_name.unwrap_or("unknown"));
-                let state_file = state_dir.join("instances_expected");
-                if state_file.exists() {
-                    let _ = std::fs::remove_file(state_file);
-                }
-
-                let subscriptions_json = state_dir.join("subscriptions.json");
-                if subscriptions_json.exists() {
-                    if let Err(e) = std::fs::remove_file(&subscriptions_json) {
-                        log::error!("Failed to remove {}: {}", subscriptions_json.display(), e);
-                    } else {
-                        log::info!("Removed {}", subscriptions_json.display());
-                    }
-                }
-
-                let dot_state_json = state_dir.join(".state.json");
-                if dot_state_json.exists() {
-                    if let Err(e) = std::fs::remove_file(&dot_state_json) {
-                        log::error!("Failed to remove {}: {}", dot_state_json.display(), e);
-                    } else {
-                        log::info!("Removed {}", dot_state_json.display());
-                    }
-                }
-
-                let mut stopped_count = 0;
-                for i in 1..=100 { 
-                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name, i);
-                    if pid_file.exists() {
-                        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.parse::<i32>() {
-                                if is_process_running(pid) {
-                                    unsafe { libc::kill(pid, libc::SIGTERM); }
-                                    stopped_count += 1;
-                                }
-                            }
-                        }
-                        let _ = std::fs::remove_file(pid_file);
-                    } else if i > config.instances {
-                        break;
-                    }
-                }
-                if stopped_count > 0 {
-                    println!("Stopped {} instance(s) of {}.", stopped_count, config_file);
-                }
-
-                // Now cleanup broker resources
-                match comp.as_str() {
-                    "sender" => {
-                        let mut flow = SenderFlow::new(config);
-                        if let Err(e) = flow.connect_full(false, false).await {
-                            log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
-                        } else {
-                            if let Err(e) = flow.cleanup().await {
-                                log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
-                            }
-                            flow.shutdown().await?;
-                        }
-                    }
-                    _ => {
-                        let mut flow = SubscribeFlow::new(config);
-                        if let Err(e) = flow.connect_full(false, false).await {
-                            log::warn!("Failed to connect for cleanup of {}: {}", config_file, e);
-                        } else {
-                            if let Err(e) = flow.cleanup().await {
-                                log::error!("Failed to cleanup broker resources for {}: {}", config_file, e);
-                            }
-                            flow.shutdown().await?;
-                        }
-                    }
-                }
+                cleanup_config(&config_file).await;
             }
         }
         Commands::Edit { config_patterns } => {
@@ -1034,12 +1043,26 @@ async fn main() -> Result<()> {
             }
 
             for config_file in configs {
-                
-                log::info!("Removing configuration: {}", config_file);
+                log::info!("Cleaning up and removing configuration: {}", config_file);
+                let state_dir = cleanup_config(&config_file).await;
+
                 if std::path::Path::new(&config_file).exists() {
-                    let _ = std::fs::remove_file(&config_file);
+                    if let Err(e) = std::fs::remove_file(&config_file) {
+                        log::error!("Failed to remove configuration file {}: {}", config_file, e);
+                    } else {
+                        log::info!("Removed configuration file {}", config_file);
+                    }
                 }
-                // Further cleanup (like state dir removal) could happen here or share logic with Cleanup
+
+                if let Some(state_dir) = state_dir {
+                    if state_dir.exists() {
+                        if let Err(e) = std::fs::remove_dir_all(&state_dir) {
+                            log::error!("Failed to remove state directory {}: {}", state_dir.display(), e);
+                        } else {
+                            log::info!("Removed state directory {}", state_dir.display());
+                        }
+                    }
+                }
             }
         }
         Commands::RunInstance { component, config_file, instance } => {
