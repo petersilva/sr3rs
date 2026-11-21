@@ -216,18 +216,13 @@ fn test_stable_rand() {
     let dir = tempdir().unwrap();
     let home = dir.path().to_path_buf();
     
-    // We need to set HOME so directories/paths uses it
-    let old_home = std::env::var("HOME").ok();
-    let old_xdg = std::env::var("XDG_CACHE_HOME").ok();
-    std::env::set_var("HOME", &home);
-    std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
-
-    println!("Cache dir: {:?}", paths::get_user_cache_dir(None));
+    let host_dir_str = home.to_string_lossy().to_string();
 
     let config_path = home.join("test.conf");
     std::fs::write(&config_path, "prefetch 10").unwrap();
 
     let mut config = Config::default();
+    config.host_dir = Some(host_dir_str.clone());
     config.apply_component_defaults("testcomp");
     config.load(config_path.to_str().unwrap()).unwrap();
     config.save_state().unwrap();    
@@ -236,23 +231,12 @@ fn test_stable_rand() {
     
     // Reload
     let mut config2 = Config::default();
+    config2.host_dir = Some(host_dir_str);
     config2.apply_component_defaults("testcomp");
     config2.load(config_path.to_str().unwrap()).unwrap();
     
     assert_eq!(config2.rand4, r4);
     assert_eq!(config2.rand8, r8);
-
-    // Restore HOME and XDG_CACHE_HOME
-    if let Some(h) = old_home {
-        std::env::set_var("HOME", h);
-    } else {
-        std::env::remove_var("HOME");
-    }
-    if let Some(x) = old_xdg {
-        std::env::set_var("XDG_CACHE_HOME", x);
-    } else {
-        std::env::remove_var("XDG_CACHE_HOME");
-    }
 }
 
 #[test]
@@ -260,11 +244,7 @@ fn test_subscriptions_persistence() {
     use tempfile::tempdir;
     let dir = tempdir().unwrap();
     let home = dir.path().to_path_buf();
-    
-    let old_home = std::env::var("HOME").ok();
-    let old_xdg = std::env::var("XDG_CACHE_HOME").ok();
-    std::env::set_var("HOME", &home);
-    std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
+    let host_dir_str = home.to_string_lossy().to_string();
 
     let config_path = home.join("test.conf");
     std::fs::write(&config_path, "
@@ -273,6 +253,7 @@ fn test_subscriptions_persistence() {
     ").unwrap();
 
     let mut config = Config::default();
+    config.host_dir = Some(host_dir_str.clone());
     config.apply_component_defaults("subscribe");
     config.load(config_path.to_str().unwrap()).unwrap();
     config.finalize().unwrap();
@@ -281,29 +262,19 @@ fn test_subscriptions_persistence() {
     let q_name = config.subscriptions[0].queue.name.clone();
     
     // Check if file exists
-    let cache_dir = paths::get_user_cache_dir(None);
+    let cache_dir = paths::get_user_cache_dir(Some(&host_dir_str));
     let state_path = cache_dir.join("subscribe/test/subscriptions.json");
     println!("Checking state path: {:?}", state_path);
     assert!(state_path.exists());
 
     // Reload
     let mut config2 = Config::default();
+    config2.host_dir = Some(host_dir_str);
     config2.apply_component_defaults("subscribe");
     config2.load(config_path.to_str().unwrap()).unwrap();
     
     assert_eq!(config2.subscriptions.len(), 1);
     assert_eq!(config2.subscriptions[0].queue.name, q_name);
-
-    if let Some(h) = old_home {
-        std::env::set_var("HOME", h);
-    } else {
-        std::env::remove_var("HOME");
-    }
-    if let Some(x) = old_xdg {
-        std::env::set_var("XDG_CACHE_HOME", x);
-    } else {
-        std::env::remove_var("XDG_CACHE_HOME");
-    }
 }
 
 #[test]

@@ -65,10 +65,16 @@ impl GatherFilePlugin {
     pub fn walk(&self, dir: &Path, base_dir: &Path) -> Vec<Message> {
         let mut messages = Vec::new();
         if dir.is_file() {
-            if let Ok(msg) = self.make_message(dir,&base_dir) {
+            if let Ok(msg) = self.make_message(dir, base_dir) {
                 messages.push(msg);
             }
             return messages;
+        }
+
+        if dir != base_dir {
+            if let Ok(msg) = self.make_message(dir, base_dir) {
+                messages.push(msg);
+            }
         }
 
         if let Ok(entries) = fs::read_dir(dir) {
@@ -76,11 +82,11 @@ impl GatherFilePlugin {
                 let path = entry.path();
                 if path.is_dir() {
                     if self.config.recursive {
-                        let mut sub = self.walk(&path, &base_dir);
+                        let mut sub = self.walk(&path, base_dir);
                         messages.append(&mut sub);
                     }
                 } else if path.is_file() {
-                    if let Ok(msg) = self.make_message(&path,&base_dir) {
+                    if let Ok(msg) = self.make_message(&path, base_dir) {
                         messages.push(msg);
                     }
                 }
@@ -98,16 +104,18 @@ impl GatherFilePlugin {
         let bd = base_dir;
         let msg = Message::from_file(path, &self.config, &bd)?;
 
-        // Check age
+        // Check age for regular files
         if let Ok(metadata) = fs::metadata(path) {
-            if let Ok(mtime) = metadata.modified() {
-                if let Ok(duration) = SystemTime::now().duration_since(mtime) {
-                    let age = duration.as_secs_f64();
-                    if age < self.config.file_age_min {
-                        return Err(anyhow::anyhow!("File too young"));
-                    }
-                    if self.config.file_age_max > 0.0 && age > self.config.file_age_max {
-                        return Err(anyhow::anyhow!("File too old"));
+            if metadata.is_file() {
+                if let Ok(mtime) = metadata.modified() {
+                    if let Ok(duration) = SystemTime::now().duration_since(mtime) {
+                        let age = duration.as_secs_f64();
+                        if age < self.config.file_age_min {
+                            return Err(anyhow::anyhow!("File too young"));
+                        }
+                        if self.config.file_age_max > 0.0 && age > self.config.file_age_max {
+                            return Err(anyhow::anyhow!("File too old"));
+                        }
                     }
                 }
             }
@@ -281,5 +289,38 @@ impl FlowCB for GatherFilePlugin {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_walk_directory_messages() {
+        let dir = tempdir().unwrap();
+        let base_dir = dir.path().to_path_buf();
+        let sub_dir = base_dir.join("sub_folder");
+        fs::create_dir_all(&sub_dir).unwrap();
+        let file_path = sub_dir.join("test_file.txt");
+        fs::write(&file_path, "hello world").unwrap();
+
+        let mut config = Config::default();
+        config.directory = base_dir.clone();
+        config.recursive = true;
+
+        let plugin = GatherFilePlugin::new(&config);
+        let messages = plugin.walk(&base_dir, &base_dir);
+
+        // Expect 2 messages: 1 for sub_folder directory and 1 for test_file.txt file
+        assert_eq!(messages.len(), 2);
+        let dir_msg = messages.iter().find(|m| m.file_operation.contains_key("directory"));
+        assert!(dir_msg.is_some());
+        assert_eq!(dir_msg.unwrap().rel_path, "sub_folder");
+
+        let file_msg = messages.iter().find(|m| !m.file_operation.contains_key("directory"));
+        assert!(file_msg.is_some());
+        assert_eq!(file_msg.unwrap().rel_path, "sub_folder/test_file.txt");
     }
 }
