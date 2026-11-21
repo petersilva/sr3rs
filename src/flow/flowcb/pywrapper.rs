@@ -171,6 +171,22 @@ class MockConfig:
         if let Some(ack_id) = &msg.ack_id {
             dict.set_item("ack_id", ack_id)?;
         }
+
+        if !msg.file_operation.is_empty() {
+            let file_op = PyDict::new(py);
+            for (k, v) in &msg.file_operation {
+                file_op.set_item(k, v)?;
+            }
+            dict.set_item("fileOp", file_op)?;
+        }
+
+        if !msg.identity.is_empty() {
+            let identity = PyDict::new(py);
+            for (k, v) in &msg.identity {
+                identity.set_item(k, v)?;
+            }
+            dict.set_item("identity", identity)?;
+        }
         
         for (k, v) in &msg.fields {
             dict.set_item(k, v)?;
@@ -189,10 +205,30 @@ class MockConfig:
         if let Ok(Some(ack_id)) = dict.get_item("ack_id").map(|i| i.map(|x| x.extract::<String>().unwrap_or_default())) {
             msg.ack_id = Some(ack_id);
         }
+
+        if let Ok(Some(file_op_obj)) = dict.get_item("fileOp") {
+            if let Ok(file_op_dict) = file_op_obj.downcast::<PyDict>() {
+                for (k, v) in file_op_dict.iter() {
+                    if let (Ok(k_str), Ok(v_str)) = (k.extract::<String>(), v.extract::<String>()) {
+                        msg.file_operation.insert(k_str, v_str);
+                    }
+                }
+            }
+        }
+
+        if let Ok(Some(id_obj)) = dict.get_item("identity") {
+            if let Ok(id_dict) = id_obj.downcast::<PyDict>() {
+                for (k, v) in id_dict.iter() {
+                    if let (Ok(k_str), Ok(v_str)) = (k.extract::<String>(), v.extract::<String>()) {
+                        msg.identity.insert(k_str, v_str);
+                    }
+                }
+            }
+        }
         
         for (k, v) in dict.iter() {
             let k_str: String = k.extract()?;
-            if k_str != "baseUrl" && k_str != "relPath" && k_str != "ack_id" {
+            if k_str != "baseUrl" && k_str != "relPath" && k_str != "ack_id" && k_str != "fileOp" && k_str != "identity" {
                 if let Ok(v_str) = v.extract::<String>() {
                     if k_str.starts_with("new_") || k_str.starts_with("_") {
                         msg.delete_on_post.insert(k_str, v_str);
@@ -348,5 +384,29 @@ impl FlowCB for PyWrapperPlugin {
         });
         join_handle.await.unwrap().map_err(|e| anyhow::anyhow!("Python plugin error: {:?}", e))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pywrapper_msg_file_op_roundtrip() {
+        Python::with_gil(|py| {
+            let mut msg = Message::new("file://localhost/", "test_dir");
+            msg.file_operation.insert("directory".to_string(), "".to_string());
+            msg.identity.insert("method".to_string(), "md5".to_string());
+            msg.identity.insert("value".to_string(), "12345".to_string());
+
+            let plugin = PyWrapperPlugin { name: "test".to_string(), instance: py.None() };
+            let py_dict = plugin.msg_to_py(py, &msg).unwrap();
+
+            let roundtrip = plugin.py_to_msg(py_dict).unwrap();
+
+            assert_eq!(roundtrip.file_operation.get("directory"), Some(&"".to_string()));
+            assert_eq!(roundtrip.identity.get("method"), Some(&"md5".to_string()));
+            assert_eq!(roundtrip.identity.get("value"), Some(&"12345".to_string()));
+        });
     }
 }
