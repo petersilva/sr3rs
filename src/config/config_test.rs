@@ -211,6 +211,19 @@ fn test_multi_publishers() {
 }
 
 #[test]
+fn test_exchange_suffix_resolution() {
+    let mut config = Config::default();
+    config.parse_string("broker amqp://tsource@localhost/", "test.conf").unwrap();
+    config.parse_string("exchangeSuffix output", "test.conf").unwrap();
+    config.parse_string("post_broker amqp://tsource@localhost/", "test.conf").unwrap();
+    config.parse_string("post_exchangeSuffix post_output", "test.conf").unwrap();
+    config.finalize().unwrap();
+
+    assert_eq!(config.resolve_exchange(), "xs_tsource_output");
+    assert_eq!(config.resolve_post_exchanges(), vec!["xs_tsource_post_output".to_string()]);
+}
+
+#[test]
 fn test_stable_rand() {
     use tempfile::tempdir;
     let dir = tempdir().unwrap();

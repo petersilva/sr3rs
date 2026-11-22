@@ -1056,17 +1056,27 @@ impl Config {
     }
 
     pub fn resolve_exchange(&self) -> String {
-        if self.exchange != "xpublic" && self.exchange != "default" {
-            return self.exchange.clone();
-        }
-        if let Some(broker) = &self.broker {
+        let mut ex = if self.exchange != "xpublic" && self.exchange != "default" {
+            self.exchange.clone()
+        } else if let Some(broker) = &self.broker {
             if let Some(user) = &broker.user {
                 if user != "anonymous" {
-                    return format!("xs_{}", user);
+                    format!("xs_{}", user)
+                } else {
+                    "xpublic".to_string()
                 }
+            } else {
+                "xpublic".to_string()
             }
+        } else {
+            "xpublic".to_string()
+        };
+
+        if let Some(suffix) = &self.exchange_suffix {
+            ex = format!("{}_{}", ex, suffix);
         }
-        "xpublic".to_string()
+
+        ex
     }
 
     fn resolve_queue_name(&self) -> String {
