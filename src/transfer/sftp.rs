@@ -67,21 +67,10 @@ impl SftpTransfer {
             }
         }
 
-        // 2. Override with local SR3 credentials if found and URL had missing info
-        let (final_user, final_pass) = if user.is_empty() || password.is_none() {
-            if let Some(cred) = self.config.credentials.get(url_str) {
-                (cred.url.username().to_string(), cred.url.password().map(|s| s.to_string()))
-            } else {
-                (user, password.map(|s| s.to_string()))
-            }
+        let final_user = if !user.is_empty() {
+            user
         } else {
-            (user, password.map(|s| s.to_string()))
-        };
-        
-        let final_user = if final_user.is_empty() {
             std::env::var("USER").unwrap_or_else(|_| "root".to_string())
-        } else {
-            final_user
         };
 
         log::debug!("SFTP Connect to {}:{} as user {}", host, port, final_user);
@@ -91,8 +80,8 @@ impl SftpTransfer {
         sess.set_tcp_stream(tcp);
         sess.handshake()?;
 
-        if let Some(pass) = final_pass {
-            sess.userauth_password(&final_user, &pass)?;
+        if let Some(pass) = password {
+            sess.userauth_password(&final_user, pass)?;
         } else {
             // Try agent first
             if sess.userauth_agent(&final_user).is_err() {
@@ -137,6 +126,18 @@ impl SftpTransfer {
         }
 
         Ok(sess)
+    }
+
+    pub async fn readdir(&self, url_str: &str, dir_path: &Path) -> anyhow::Result<Vec<(PathBuf, ssh2::FileStat)>> {
+        let url = url_str.to_string();
+        let path = dir_path.to_path_buf();
+        let self_clone = Self::new(&self.config);
+        tokio::task::spawn_blocking(move || {
+            let sess = self_clone.connect_to(&url)?;
+            let sftp = sess.sftp()?;
+            let entries = sftp.readdir(&path)?;
+            Ok(entries)
+        }).await?
     }
 }
 
