@@ -251,10 +251,12 @@ pub fn get_state(config_file: &str) -> String {
         false
     };
 
+    let is_interactive = (comp == "post" || comp == "cpost") && config.sleep <= 0.0;
+
     let mut state = if state_dir.join("disabled").exists() {
         "stop".to_string()
     } else if instances_requested == 0 && running_count == 0 {
-        if comp == "post" || comp == "cpost" {
+        if is_interactive {
             "inte".to_string()
         } else if state_exists {
             "stop".to_string()
@@ -262,7 +264,7 @@ pub fn get_state(config_file: &str) -> String {
             "new".to_string()
         }
     } else if running_count == 0 {
-        if comp == "post" || comp == "cpost" {
+        if is_interactive {
             "inte".to_string()
         } else {
             "stop".to_string()

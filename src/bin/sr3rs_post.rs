@@ -76,22 +76,34 @@ async fn main() -> Result<()> {
             log::warn!("Failed to save state for {}: {}", config_file, e);
         }
 
-        let mut flow = SubscribeFlow::new(config_obj);
-        let mut total_count = 0;
+        let mut flow = SubscribeFlow::new(config_obj.clone());
         flow.connect().await?;
 
-        loop {
-            let mut worklist = Worklist::new();
-            let batch_count = flow.run_once(&mut worklist).await?;
-            if batch_count == 0 {
-                break;
-            };
-            total_count += batch_count;
-        };
-        //flow.post(&mut worklist).await?;
+        if config_obj.sleep > 0.0 {
+            log::info!("sleep > 0.0 ({}s): running as continuous watcher for {}.", config_obj.sleep, config_file);
+            let token = tokio_util::sync::CancellationToken::new();
+            let token_clone = token.clone();
+            tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                log::info!("Ctrl+C received, shutting down gracefully...");
+                token_clone.cancel();
+            });
 
-        log::info!("Successfully announced {} files using {}.", total_count, config_file);
-        flow.shutdown().await?;
+            flow.run_with_shutdown(token).await?;
+        } else {
+            let mut total_count = 0;
+            loop {
+                let mut worklist = Worklist::new();
+                let batch_count = flow.run_once(&mut worklist).await?;
+                if batch_count == 0 {
+                    break;
+                };
+                total_count += batch_count;
+            }
+
+            log::info!("Successfully announced {} files using {}.", total_count, config_file);
+            flow.shutdown().await?;
+        }
     }
 
     Ok(())

@@ -419,11 +419,6 @@ async fn main() -> Result<()> {
             for config_file in configs {
                 
                 let comp = detect_component(&config_file);
-                // Skip interactive components for start command
-                if comp == "post" || comp == "cpost" {
-                    log::info!("Skipping start for interactive component: {} ({})", comp, config_file);
-                    continue;
-                }
 
                 let mut config = Config::new();
                 config.apply_component_defaults(&comp);
@@ -433,6 +428,13 @@ async fn main() -> Result<()> {
                 }
                 if let Err(e) = config.finalize() {
                     log::error!("Failed to finalize {}: {}", config_file, e);
+                    continue;
+                }
+
+                // Skip interactive components for start command unless sleep > 0
+                let is_interactive = (comp == "post" || comp == "cpost") && config.sleep <= 0.0;
+                if is_interactive {
+                    log::info!("Skipping start for interactive component: {} ({})", comp, config_file);
                     continue;
                 }
 
@@ -455,6 +457,11 @@ async fn main() -> Result<()> {
                 write!(f, "{}", num_instances)?;
 
                 for i in 1..=num_instances {
+                    let log_file = paths::get_log_filename(config.host_dir.as_deref(), &comp, config.configname.as_deref(), i);
+                    if let Some(parent) = log_file.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+
                     let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config.configname.as_deref(), i);
                     if pid_file.exists() {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
@@ -604,12 +611,14 @@ async fn main() -> Result<()> {
                     false
                 };
 
+                let is_interactive = (comp == "post" || comp == "cpost") && config.sleep <= 0.0;
+
                 let mut state = if state_dir.join("disabled").exists() {
                     "stop".to_string()
                 } else if crashed_count > 0 && running_count == 0 {
                     "crashed".to_string()
                 } else if instances_requested == 0 && running_count == 0 {
-                    if comp == "post" || comp == "cpost" {
+                    if is_interactive {
                         "inte".to_string()
                     } else if state_exists {
                         "stop".to_string()
@@ -617,7 +626,7 @@ async fn main() -> Result<()> {
                         "new".to_string()
                     }
                 } else if running_count == 0 {
-                    if comp == "post" || comp == "cpost" {
+                    if is_interactive {
                         "inte".to_string()
                     } else {
                         "stop".to_string()
