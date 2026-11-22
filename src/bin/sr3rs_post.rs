@@ -58,21 +58,23 @@ async fn main() -> Result<()> {
     };
 
     setup_logging(log_level, None)?;
-    let comp = "post".to_string();
-    let configs = resolve_patterns(cli.config, &comp);
+    let configs = resolve_patterns(cli.config, "post");
     
     for config_file in configs {
+        let comp = sr3rs::utils::detect_component(&config_file);
         let mut config_obj = Config::new();
         config_obj.apply_component_defaults(&comp);
         config_obj.load(&config_file)?;
-         if let Some(m) = cli.message_count_max {
-                config_obj.message_count_max = m as u32;
-         }
+        if let Some(m) = cli.message_count_max {
+            config_obj.message_count_max = m as u32;
+        }
 
         config_obj.finalize()?;
         config_obj.post_paths = cli.files.iter().map(PathBuf::from).collect();
 
-
+        if let Err(e) = config_obj.save_state() {
+            log::warn!("Failed to save state for {}: {}", config_file, e);
+        }
 
         let mut flow = SubscribeFlow::new(config_obj);
         let mut total_count = 0;

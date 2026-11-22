@@ -101,7 +101,17 @@ pub fn resolve_patterns(patterns: Vec<String>, default_component: &str) -> Vec<S
             if p.contains('/') {
                 vec![config_dir.join(&p).to_string_lossy().to_string()]
             } else {
-                vec![config_dir.join("**").join(&p).to_string_lossy().to_string()]
+                let mut v = vec![config_dir.join(default_component).join("**").join(&p).to_string_lossy().to_string()];
+                if default_component == "post" {
+                    v.push(config_dir.join("cpost").join("**").join(&p).to_string_lossy().to_string());
+                } else if default_component == "cpost" {
+                    v.push(config_dir.join("post").join("**").join(&p).to_string_lossy().to_string());
+                } else if default_component == "shovel" {
+                    v.push(config_dir.join("cpump").join("**").join(&p).to_string_lossy().to_string());
+                } else if default_component == "cpump" {
+                    v.push(config_dir.join("shovel").join("**").join(&p).to_string_lossy().to_string());
+                }
+                v
             }
         } else {
             if p.contains('/') {
@@ -110,10 +120,24 @@ pub fn resolve_patterns(patterns: Vec<String>, default_component: &str) -> Vec<S
                     config_dir.join(format!("{}.conf", p)).to_string_lossy().to_string()
                 ]
             } else {
-                vec![
+                let mut v = vec![
                     config_dir.join(default_component).join(&p).to_string_lossy().to_string(),
                     config_dir.join(default_component).join(format!("{}.conf", p)).to_string_lossy().to_string()
-                ]
+                ];
+                if default_component == "post" {
+                    v.push(config_dir.join("cpost").join(&p).to_string_lossy().to_string());
+                    v.push(config_dir.join("cpost").join(format!("{}.conf", p)).to_string_lossy().to_string());
+                } else if default_component == "cpost" {
+                    v.push(config_dir.join("post").join(&p).to_string_lossy().to_string());
+                    v.push(config_dir.join("post").join(format!("{}.conf", p)).to_string_lossy().to_string());
+                } else if default_component == "shovel" {
+                    v.push(config_dir.join("cpump").join(&p).to_string_lossy().to_string());
+                    v.push(config_dir.join("cpump").join(format!("{}.conf", p)).to_string_lossy().to_string());
+                } else if default_component == "cpump" {
+                    v.push(config_dir.join("shovel").join(&p).to_string_lossy().to_string());
+                    v.push(config_dir.join("shovel").join(format!("{}.conf", p)).to_string_lossy().to_string());
+                }
+                v
             }
         };
 
@@ -258,4 +282,25 @@ pub fn get_state(config_file: &str) -> String {
     }
     
     state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_resolve_patterns_fallback_cpost() {
+        let dir = tempdir().unwrap();
+        let cpost_dir = dir.path().join("cpost");
+        std::fs::create_dir_all(&cpost_dir).unwrap();
+        let conf_file = cpost_dir.join("test_cpost.conf");
+        std::fs::write(&conf_file, "# cpost config\n").unwrap();
+
+        paths::set_config_dir_override(dir.path().to_path_buf());
+
+        let results = resolve_patterns(vec!["test_cpost.conf".to_string()], "post");
+        assert_eq!(results.len(), 1);
+        assert_eq!(detect_component(&results[0]), "cpost");
+    }
 }
