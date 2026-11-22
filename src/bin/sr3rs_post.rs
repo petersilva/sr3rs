@@ -17,8 +17,12 @@ struct Cli {
     #[arg(short, long)]
     config: Vec<String>,
 
-    /// Files to announce
-    files: Vec<String>,
+    /// Files or paths to announce (via -p or --path)
+    #[arg(short = 'p', long = "path", num_args = 1..)]
+    paths: Vec<String>,
+
+    /// Positional files to announce
+    positional_files: Vec<String>,
 
     /// Set log level (debug, info, warn, error)
     #[arg(long, alias = "logLevel")]
@@ -70,7 +74,9 @@ async fn main() -> Result<()> {
         }
 
         config_obj.finalize()?;
-        config_obj.post_paths = cli.files.iter().map(PathBuf::from).collect();
+        let mut all_files = cli.paths.clone();
+        all_files.extend(cli.positional_files.clone());
+        config_obj.post_paths = all_files.iter().map(PathBuf::from).collect();
 
         if let Err(e) = config_obj.save_state() {
             log::warn!("Failed to save state for {}: {}", config_file, e);
