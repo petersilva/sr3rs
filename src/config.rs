@@ -566,7 +566,15 @@ impl Config {
                     }
                     Ok(())
                 }
-                "accelThreshold" => {
+                "accelCpCommand" | "accel_cp_command" | "download_cp_command" => {
+                    if let Some(ref val) = v {
+                        self.options.insert("accelCpCommand".to_string(), val.to_string());
+                        self.options.insert("accel_cp_command".to_string(), val.to_string());
+                        self.options.insert("download_cp_command".to_string(), val.to_string());
+                    }
+                    Ok(())
+                }
+                "accelThreshold" | "accel_threshold" | "accel_cp_threshold" | "accel_scp_threshold" | "accel_wget_threshold" => {
                     if let Some(ref val) = v {
                         self.accel_threshold = parse_count(val);
                     }

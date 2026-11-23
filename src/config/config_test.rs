@@ -411,3 +411,17 @@ fn test_log_reject_option() {
     assert!(!log_plugin4.log_events.contains("reject"));
 }
 
+#[test]
+fn test_accel_cp_command_parsing() {
+    let mut config = Config::default();
+    config.parse_string("accel_cp_command dd if=%s of=%d", "test.conf").unwrap();
+    assert_eq!(config.options.get("accelCpCommand"), Some(&"dd if=%s of=%d".to_string()));
+    assert_eq!(config.options.get("accel_cp_command"), Some(&"dd if=%s of=%d".to_string()));
+    assert_eq!(config.options.get("download_cp_command"), Some(&"dd if=%s of=%d".to_string()));
+
+    let mut config2 = Config::default();
+    config2.parse_string("accel_cp_threshold 100", "test.conf").unwrap();
+    assert_eq!(config2.accel_threshold, 100);
+}
+
+
