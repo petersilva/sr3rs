@@ -152,7 +152,30 @@ impl Transfer for SftpTransfer {
         tokio::task::spawn_blocking(move || {
             let sess = self_clone.connect_to(&base_url)?;
             let sftp = sess.sftp()?;
-            let mut remote_file = sftp.open(Path::new(&rel_path))?;
+
+            let remote_url = match url::Url::parse(&base_url) {
+                Ok(u) => u,
+                Err(_) => return Err(anyhow::anyhow!("Invalid base_url: {}", base_url)),
+            };
+            let base_path = remote_url.path();
+            let clean_base = base_path.trim_start_matches('/').trim_end_matches('/');
+            let clean_rel = rel_path.trim_start_matches('/');
+
+            let full_remote_path = if !clean_base.is_empty() {
+                if clean_rel.starts_with(clean_base) {
+                    PathBuf::from("/").join(clean_rel)
+                } else {
+                    PathBuf::from("/").join(clean_base).join(clean_rel)
+                }
+            } else {
+                if rel_path.starts_with('/') {
+                    PathBuf::from(&rel_path)
+                } else {
+                    PathBuf::from("/").join(clean_rel)
+                }
+            };
+
+            let mut remote_file = sftp.open(&full_remote_path)?;
             
             // Ensure parent directory exists
             if let Some(parent) = local_path.parent() {

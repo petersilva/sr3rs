@@ -88,7 +88,7 @@ impl PostFormat for V02 {
         }
 
         if let Some(sum_val) = msg.fields.remove("sum") {
-            if sum_val.len() > 0 {
+            if !sum_val.is_empty() {
                 let algo_char = &sum_val[0..1];
                 let sv = if sum_val.len() > 2 { &sum_val[2..] } else { "" };
                 let mut sm = "";
@@ -121,32 +121,52 @@ impl PostFormat for V02 {
                 };
 
                 if let Some(oldname) = msg.fields.remove("oldname") {
-                    let mut file_op = serde_json::Map::new();
-                    file_op.insert("rename".to_string(), serde_json::Value::String(oldname));
-                    match sm {
-                        "mkdir" => { file_op.insert("mkdir".to_string(), serde_json::Value::String("".to_string())); },
-                        "link" => {
-                            if let Some(link_val) = msg.fields.remove("link") {
-                                file_op.insert("link".to_string(), serde_json::Value::String(link_val));
-                            }
-                        },
-                        _ => {
-                            msg.fields.insert("identity".to_string(), serde_json::json!({"method": sm, "value": final_sv}).to_string());
+                    msg.file_operation.insert("rename".to_string(), oldname.clone());
+                    msg.fields.insert("fileOp".to_string(), serde_json::json!({"rename": oldname}).to_string());
+                }
+
+                match sm {
+                    "remove" => {
+                        msg.file_operation.insert("remove".to_string(), "".to_string());
+                        msg.fields.insert("fileOp".to_string(), serde_json::json!({"remove": ""}).to_string());
+                    }
+                    "mkdir" => {
+                        msg.file_operation.insert("directory".to_string(), "".to_string());
+                        msg.fields.insert("fileOp".to_string(), serde_json::json!({"directory": ""}).to_string());
+                    }
+                    "rmdir" => {
+                        msg.file_operation.insert("directory".to_string(), "".to_string());
+                        msg.file_operation.insert("remove".to_string(), "".to_string());
+                        msg.fields.insert("fileOp".to_string(), serde_json::json!({"remove": "", "directory": ""}).to_string());
+                    }
+                    "link" => {
+                        if let Some(link_val) = msg.fields.remove("link") {
+                            msg.file_operation.insert("link".to_string(), link_val.clone());
+                            msg.fields.insert("fileOp".to_string(), serde_json::json!({"link": link_val}).to_string());
                         }
                     }
-                    msg.fields.insert("fileOp".to_string(), serde_json::to_string(&file_op).unwrap());
-                } else if sm == "remove" {
-                    msg.fields.insert("fileOp".to_string(), serde_json::json!({"remove": ""}).to_string());
-                } else if sm == "mkdir" {
-                    msg.fields.insert("fileOp".to_string(), serde_json::json!({"directory": ""}).to_string());
-                } else if sm == "rmdir" {
-                    msg.fields.insert("fileOp".to_string(), serde_json::json!({"remove": "", "directory": ""}).to_string());
-                } else if let Some(link) = msg.fields.remove("link") {
-                    msg.fields.insert("fileOp".to_string(), serde_json::json!({"link": link}).to_string());
-                } else if sm == "md5name" {
-                    // pass
-                } else if sm != "" {
-                    msg.fields.insert("identity".to_string(), serde_json::json!({"method": sm, "value": final_sv}).to_string());
+                    "md5name" => {}
+                    "" => {}
+                    _ => {
+                        msg.identity.insert(sm.to_string(), final_sv.clone());
+                        msg.fields.insert("identity".to_string(), serde_json::json!({"method": sm, "value": final_sv}).to_string());
+                    }
+                }
+
+                if let Some(link_val) = msg.fields.remove("link") {
+                    msg.file_operation.insert("link".to_string(), link_val.clone());
+                    msg.fields.insert("fileOp".to_string(), serde_json::json!({"link": link_val}).to_string());
+                }
+            }
+        }
+
+        if let Some(fo_val) = msg.fields.get("fileOp").cloned() {
+            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&fo_val) {
+                if let Some(obj) = json_val.as_object() {
+                    for (k, v) in obj {
+                        let v_str = v.as_str().unwrap_or("").to_string();
+                        msg.file_operation.insert(k.clone(), v_str);
+                    }
                 }
             }
         }
@@ -188,5 +208,28 @@ impl PostFormat for V02 {
         headers.insert("topic".to_string(), topic_derive(msg, options).join("."));
 
         Some((raw_body, headers, self.content_type().to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_v02_import_file_op() {
+        let v02 = V02::new();
+        let body = b"20260101000000.000 file:/test_dir sub_folder";
+        
+        // Test sum = m (mkdir)
+        let mut headers = HashMap::new();
+        headers.insert("sum".to_string(), "m".to_string());
+        let msg = v02.import_mine(body, &headers, &serde_json::Value::Null).unwrap();
+        assert!(msg.file_operation.contains_key("directory"));
+
+        // Test explicit fileOp JSON header
+        let mut headers2 = HashMap::new();
+        headers2.insert("fileOp".to_string(), "{\"directory\":\"\"}".to_string());
+        let msg2 = v02.import_mine(body, &headers2, &serde_json::Value::Null).unwrap();
+        assert!(msg2.file_operation.contains_key("directory"));
     }
 }
