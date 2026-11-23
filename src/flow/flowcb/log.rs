@@ -289,7 +289,21 @@ impl FlowCB for LogPlugin {
                         msg.rel_path.clone()
                     };
                     log::info!("after_work directory ok: {}", dir_path);
-                } else if self.action_verb.is_empty() || self.action_verb == "written" || self.action_verb == "downloaded" {
+                } else {
+                    let verb = if let Some(_target) = msg.file_operation.get("link") {
+                        "linked"
+                    } else if msg.file_operation.contains_key("remove") {
+                        "removed"
+                    } else if msg.file_operation.contains_key("rename") {
+                        "renamed"
+                    } else if msg.fields.contains_key("content") {
+                        "written from message"
+                    } else if !self.action_verb.is_empty() {
+                        self.action_verb.as_str()
+                    } else {
+                        "downloaded"
+                    };
+
                     let file_path = if let (Some(new_dir), Some(new_file)) = (
                         msg.delete_on_post.get("new_dir"),
                         msg.delete_on_post.get("new_file")
@@ -302,9 +316,8 @@ impl FlowCB for LogPlugin {
                     } else {
                         msg.rel_path.clone()
                     };
-                    log::info!("after_work written from message ok: {} size: {}Bytes ({})", file_path, size, size);
-                } else {
-                    log::info!("{} ok: {} size: {}", self.action_verb, msg.rel_path, size);
+
+                    log::info!("after_work {} ok: {} size: {}", verb, file_path, size);
                 }
             }
         }
