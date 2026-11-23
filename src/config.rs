@@ -114,6 +114,8 @@ pub struct Config {
     pub perm_dir_default: u32,
     pub post_on_start: bool,
     pub force_polling: bool,
+    pub inline: bool,
+    pub inline_byte_max: u64,
     pub identity_method: String,
     pub post_paths: Vec<PathBuf>,
     pub memory_max: u64,
@@ -211,6 +213,8 @@ impl Default for Config {
             perm_dir_default: 0,
             post_on_start: false,
             force_polling: false,
+            inline: false,
+            inline_byte_max: 4096,
             time_copy: false,
             identity_method: "sha512".to_string(),
             post_paths: Vec::new(),
@@ -634,6 +638,20 @@ impl Config {
                     }
                     Ok(())
                 }
+                "inline" | "inl" => {
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.inline = is_true(val_str);
+                    self.options.insert("inline".to_string(), val_str.to_string());
+                    Ok(())
+                }
+                "inline_max" | "inlineByteMax" | "inline_byte_max" => {
+                    if let Some(ref val) = v {
+                        self.inline_byte_max = parse_count(val) as u64;
+                        self.options.insert("inlineByteMax".to_string(), val.to_string());
+                        self.options.insert("inline_max".to_string(), val.to_string());
+                    }
+                    Ok(())
+                }
                 "strip" => {
                     if let Some(ref val) = v {
                         self.strip = Some(val.to_string());
@@ -908,7 +926,7 @@ impl Config {
                     self.options.insert("log_reject".to_string(), val_str.to_string());
                     Ok(())
                 }
-                "set" | "logEvents" | "logMessageDump" | "events" | "fileEvents" | "retryEmptyBeforeExit" | "accelFtpgetCommand" | "accelFtpputCommand" | "mdelay" | "retry_refilter" | "inline" | "inline_max" | "plugin" | "flow_plugin" | "debug" | "sum" | "inflight" => {
+                "set" | "logEvents" | "logMessageDump" | "events" | "fileEvents" | "retryEmptyBeforeExit" | "accelFtpgetCommand" | "accelFtpputCommand" | "mdelay" | "retry_refilter" | "plugin" | "flow_plugin" | "debug" | "sum" | "inflight" => {
                     if let Some(ref val) = v {
                         self.options.insert(k.to_string(), val.to_string());
                     } else if k == "debug" {

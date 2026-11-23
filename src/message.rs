@@ -150,6 +150,41 @@ impl Message {
         Ok(msg)
     }
 
+    pub fn put_content_inline(&mut self, path: &std::path::Path, inline_byte_max: u64) {
+        if self.fields.contains_key("content") {
+            return;
+        }
+
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let size = metadata.len();
+            if size >= inline_byte_max {
+                log::warn!(
+                    "Not placing file contents in message due to file size being too big. File size {}, inlineByteMax: {}",
+                    size,
+                    inline_byte_max
+                );
+                return;
+            }
+
+            if let Ok(bytes) = std::fs::read(path) {
+                let content_obj = match String::from_utf8(bytes.clone()) {
+                    Ok(text) => serde_json::json!({
+                        "value": text,
+                        "encoding": "utf-8"
+                    }),
+                    Err(_) => {
+                        use base64::{Engine as _, engine::general_purpose::STANDARD};
+                        serde_json::json!({
+                            "value": STANDARD.encode(&bytes),
+                            "encoding": "base64"
+                        })
+                    }
+                };
+                self.fields.insert("content".to_string(), content_obj.to_string());
+            }
+        }
+    }
+
     pub fn parse_v02_time(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         // v02 time is usually YYYYMMDDHHMMSS.sss
         if s.len() < 14 { return None; }
@@ -176,18 +211,39 @@ impl Message {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_message_creation() {
-        let msg = Message::new("sftp://user@host/", "path/to/file.txt");
-        assert_eq!(msg.base_url, "sftp://user@host/");
-        assert_eq!(msg.rel_path, "path/to/file.txt");
-        assert!(msg.fields.is_empty());
-    }
+#[test]
+fn test_message_creation() {
+    let msg = Message::new("sftp://user@host/", "path/to/file.txt");
+    assert_eq!(msg.base_url, "sftp://user@host/");
+    assert_eq!(msg.rel_path, "path/to/file.txt");
+    assert!(msg.fields.is_empty());
+}
 
-    #[test]
-    fn test_message_fields() {
-        let mut msg = Message::new("http://host/", "file.txt");
-        msg.fields.insert("product".to_string(), "METEO".to_string());
-        assert_eq!(msg.fields.get("product").unwrap(), "METEO");
-    }
+#[test]
+fn test_message_fields() {
+    let mut msg = Message::new("http://host/", "file.txt");
+    msg.fields.insert("product".to_string(), "METEO".to_string());
+    assert_eq!(msg.fields.get("product").unwrap(), "METEO");
+}
+
+#[test]
+fn test_put_content_inline() {
+    use tempfile::NamedTempFile;
+    use std::io::Write;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "hello inline world").unwrap();
+
+    let mut msg = Message::new("file:/", "test.txt");
+    msg.put_content_inline(file.path(), 4096);
+
+    let content_str = msg.fields.get("content").unwrap();
+    assert!(content_str.contains("hello inline world"));
+    assert!(content_str.contains("utf-8"));
+
+    // Test file too big
+    let mut msg2 = Message::new("file:/", "test.txt");
+    msg2.put_content_inline(file.path(), 5); // max size 5 < 18
+    assert!(!msg2.fields.contains_key("content"));
+}
 }

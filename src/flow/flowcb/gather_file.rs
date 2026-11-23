@@ -106,10 +106,14 @@ impl GatherFilePlugin {
             return Err(anyhow::anyhow!("Skipping . or .."));
         }
         let bd = base_dir;
-        let msg = Message::from_file(path, &self.config, &bd)?;
+        let mut msg = Message::from_file(path, &self.config, &bd)?;
 
         if msg.file_operation.contains_key("directory") && msg.rel_path.is_empty() {
             return Err(anyhow::anyhow!("Skipping root directory"));
+        }
+
+        if self.config.inline && msg.file_operation.is_empty() {
+            msg.put_content_inline(path, self.config.inline_byte_max);
         }
 
         // Check age for regular files
