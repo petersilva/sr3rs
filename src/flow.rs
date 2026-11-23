@@ -340,6 +340,46 @@ pub trait Flow: Send + Sync {
                     continue;
                 }
 
+                if let Some(content_str) = m.fields.get("content").cloned() {
+                    if let Some(parent) = local_file.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+
+                    let bytes = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content_str) {
+                        if let Some(val_str) = json_val.get("value").and_then(|v| v.as_str()) {
+                            let encoding = json_val.get("encoding").and_then(|e| e.as_str()).unwrap_or("identity");
+                            if encoding == "base64" || encoding == "b64" {
+                                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                                STANDARD.decode(val_str).unwrap_or_else(|_| val_str.as_bytes().to_vec())
+                            } else {
+                                val_str.as_bytes().to_vec()
+                            }
+                        } else {
+                            content_str.as_bytes().to_vec()
+                        }
+                    } else if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &content_str) {
+                        bytes
+                    } else {
+                        content_str.as_bytes().to_vec()
+                    };
+
+                    match std::fs::write(&local_file, &bytes) {
+                        Ok(_) => {
+                            ::log::info!("WORK: written from message ok: {} ({} bytes)", local_file.display(), bytes.len());
+                            m.fields.insert("size".to_string(), bytes.len().to_string());
+                            worklist.ok.push(m);
+                            ok_count += 1;
+                            bytes_in += bytes.len() as u64;
+                        }
+                        Err(e) => {
+                            ::log::error!("WORK: failed to write content to {}: {}", local_file.display(), e);
+                            worklist.failed.push(m);
+                            failed_count += 1;
+                        }
+                    }
+                    continue;
+                }
+
                 if local_file.is_file() {
                     if let (Some(method), Some(remote_val)) = (m.identity.get("method"), m.identity.get("value")) {
                         if method != "cod" && method != "random" {
@@ -921,6 +961,34 @@ mod tests {
         let rep = wl.rejected[0].report.as_ref().unwrap();
         assert_eq!(rep.code, 304);
         assert!(rep.message.contains("same checksum"));
+    }
+
+    #[tokio::test]
+    async fn test_work_inline_content() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let target_file = dir.path().join("inline.txt");
+
+        let mut config = Config::new();
+        config.download = true;
+        config.directory = dir.path().to_path_buf();
+
+        let flow = BaseFlow::new(config);
+        let mut wl = Worklist::new();
+        let mut msg = Message::new("file:/", "inline.txt");
+        msg.fields.insert("content".to_string(), "hello inline world".to_string());
+        msg.delete_on_post.insert("new_dir".to_string(), dir.path().to_string_lossy().to_string());
+        msg.delete_on_post.insert("new_file".to_string(), "inline.txt".to_string());
+
+        wl.incoming.push(msg);
+
+        flow.work(&mut wl).await.unwrap();
+
+        assert_eq!(wl.incoming.len(), 0);
+        assert_eq!(wl.ok.len(), 1);
+        assert!(target_file.exists());
+        let written = std::fs::read_to_string(&target_file).unwrap();
+        assert_eq!(written, "hello inline world");
     }
 }
   
