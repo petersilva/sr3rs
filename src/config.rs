@@ -66,6 +66,7 @@ pub struct Config {
     pub accept_unmatched: bool,
     pub directory: PathBuf,
     pub download: bool,
+    pub do_download: Option<String>,
     pub report: bool,
     pub strip: Option<String>,
     pub accel_threshold: u32,
@@ -173,6 +174,7 @@ impl Default for Config {
             accept_unmatched: true,
             directory: PathBuf::from("."),
             download: false,
+            do_download: None,
             mirror: true, // Default for most components in SR3
             instances: 1,
             housekeeping: 300,
@@ -601,6 +603,13 @@ impl Config {
                 "download" => {
                     if let Some(ref val) = v {
                         self.download = is_true(val);
+                    }
+                    Ok(())
+                }
+                "do_download" => {
+                    if let Some(ref val) = v {
+                        self.do_download = Some(val.to_string());
+                        self.options.insert("do_download".to_string(), val.to_string());
                     }
                     Ok(())
                 }
