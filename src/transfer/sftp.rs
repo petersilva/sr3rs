@@ -171,7 +171,7 @@ impl Transfer for SftpTransfer {
                 if rel_path.starts_with('/') {
                     PathBuf::from(&rel_path)
                 } else {
-                    PathBuf::from("/").join(clean_rel)
+                    PathBuf::from(clean_rel)
                 }
             };
 
