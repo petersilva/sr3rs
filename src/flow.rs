@@ -105,10 +105,15 @@ pub trait Flow: Send + Sync {
                         rel_path = parts.last().unwrap().to_string(); // fallback to just filename if over-stripped
                     }
                 }
-            } else if let Ok(re) = regex::Regex::new(strip_val) {
-                rel_path = re.replace(&rel_path, "").to_string();
             } else {
-                ::log::warn!("Invalid strip value: {}", strip_val);
+                let pattern = strip_val.trim_start_matches('/');
+                if let Ok(re) = regex::Regex::new(pattern) {
+                    rel_path = re.replace(&rel_path, "").trim_start_matches('/').to_string();
+                } else if let Ok(re) = regex::Regex::new(strip_val) {
+                    rel_path = re.replace(&rel_path, "").trim_start_matches('/').to_string();
+                } else {
+                    ::log::warn!("Invalid strip value: {}", strip_val);
+                }
             }
         }
 
@@ -117,8 +122,7 @@ pub trait Flow: Send + Sync {
         let clean_rel = rel_path.trim_start_matches('/');
         let clean_dest = dest_dir.trim_start_matches('/');
         if let Some(new_rel) = clean_rel.strip_prefix(clean_dest) {
-            msg.rel_path = new_rel.trim_start_matches('/').to_string();
-            rel_path = msg.rel_path.clone();
+            rel_path = new_rel.trim_start_matches('/').to_string();
         } 
  
         let mut new_dir = dest_dir.clone();
@@ -965,6 +969,40 @@ mod tests {
 
        assert_eq!(m.delete_on_post.get("new_dir").unwrap().to_string(), "/home/peter/sarra_devdocroot/downloaded_by_sub_amqp/20200105/WXO-DD/bulletins/alphanumeric/20200105/SX/KWAL/03" );
        assert_eq!(m.delete_on_post.get("new_file").unwrap().to_string(), "SXCN40_KWAL_050300___47957".to_string() );
+    }
+
+    #[test]
+    fn test_message_adjust_filter_strip() {
+        let mut m = crate::message::Message::new(
+            "file:/",
+            "home/peter/sarra_devdocroot/downloaded_by_sub_amqp/20200105/WXO-DD/meteocode/atl/csv/2020-01-05T03-00-01Z_FPHX14_r3zf_PA.csv",
+        );
+        m.delete_on_post.insert("_mirror".to_string(), "true".to_string());
+        m.delete_on_post.insert(
+            "_dest_dir".to_string(),
+            "/home/peter/sarra_devdocroot/downloaded_by_sub_rabbitmqtt".to_string(),
+        );
+        m.delete_on_post.insert(
+            "_strip".to_string(),
+            "/home/peter/sarra_devdocroot/downloaded_by_sub_amqp".to_string(),
+        );
+
+        let config = Config::new();
+        let flow = BaseFlow::new(config);
+        flow.message_adjust_filter(&mut m);
+
+        assert_eq!(
+            m.delete_on_post.get("new_dir").unwrap().to_string(),
+            "/home/peter/sarra_devdocroot/downloaded_by_sub_rabbitmqtt/20200105/WXO-DD/meteocode/atl/csv"
+        );
+        assert_eq!(
+            m.delete_on_post.get("new_file").unwrap().to_string(),
+            "2020-01-05T03-00-01Z_FPHX14_r3zf_PA.csv"
+        );
+        assert_eq!(
+            m.rel_path,
+            "home/peter/sarra_devdocroot/downloaded_by_sub_amqp/20200105/WXO-DD/meteocode/atl/csv/2020-01-05T03-00-01Z_FPHX14_r3zf_PA.csv"
+        );
     }
 
     #[tokio::test]
