@@ -7,7 +7,7 @@ use crate::message::Message;
 use crate::Config;
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -400,107 +400,40 @@ pub trait Flow: Send + Sync {
                     }
                 }
 
-fn perform_do_download(
-    config: &Config,
-    m: &Message,
-    local_file: &Path,
-) -> anyhow::Result<Option<u64>> {
-    let dd = match &config.do_download {
-        Some(val) => val.as_str(),
-        None => return Ok(None),
-    };
-
-    if dd == "smc_download_cp" || dd == "download_cp" || dd.contains("download_cp") {
-        let cmd_template = config.options.get("download_cp_command")
-            .or_else(|| config.options.get("accelCpCommand"))
-            .or_else(|| config.options.get("accel_cp_command"))
-            .cloned()
-            .unwrap_or_else(|| "cp --preserve=timestamps".to_string());
-
-        let url_res = url::Url::parse(&m.base_url);
-        let raw_path = if let Ok(u) = &url_res {
-            u.path().to_string()
-        } else {
-            m.base_url.clone()
-        };
-        let clean_raw = raw_path.trim_start_matches('/');
-        let clean_rel = m.rel_path.trim_start_matches('/');
-
-        let combined_path = if clean_raw.is_empty() {
-            clean_rel.to_string()
-        } else if clean_rel.starts_with(clean_raw) {
-            clean_rel.to_string()
-        } else {
-            format!("{}/{}", clean_raw, clean_rel)
-        };
-
-        let source_path = {
-            let p_abs = PathBuf::from("/").join(&combined_path);
-            if p_abs.exists() {
-                p_abs
-            } else if let Ok(home) = std::env::var("HOME") {
-                let p_home = PathBuf::from(&home).join(&combined_path);
-                if p_home.exists() {
-                    p_home
-                } else {
-                    p_abs
+                let mut cb_handled = None;
+                for cb_mutex in self.callbacks() {
+                    let cb = cb_mutex.lock().await;
+                    let res = cb.download(&m, &local_file).await;
+                    let cb_name = cb.name().to_string();
+                    match res {
+                        Ok(Some(size)) => {
+                            cb_handled = Some(Ok((cb_name, size)));
+                            break;
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            cb_handled = Some(Err((cb_name, e)));
+                            break;
+                        }
+                    }
                 }
-            } else {
-                p_abs
-            }
-        };
 
-        if let Some(parent) = local_file.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let arg1 = source_path.to_string_lossy().to_string();
-        let arg2 = local_file.to_string_lossy().to_string();
-
-        let cmd_str = if cmd_template.contains("%s") && cmd_template.contains("%d") {
-            cmd_template.replace("%s", &arg1).replace("%d", &arg2)
-        } else {
-            format!("{} {} {}", cmd_template, arg1, arg2)
-        };
-
-        let parts: Vec<&str> = cmd_str.split_whitespace().collect();
-        if parts.is_empty() {
-            return Ok(None);
-        }
-
-        ::log::info!("do_download {} executing: {}", dd, cmd_str);
-        let status = std::process::Command::new(parts[0])
-            .args(&parts[1..])
-            .status()
-            .map_err(|e| anyhow::anyhow!("Failed to execute do_download command '{}': {}", cmd_str, e))?;
-
-        if status.success() {
-            let metadata = std::fs::metadata(local_file)?;
-            Ok(Some(metadata.len()))
-        } else {
-            Err(anyhow::anyhow!("do_download command failed with exit status {:?}: {}", status.code(), cmd_str))
-        }
-    } else {
-        Ok(None)
-    }
-}
-
-                match perform_do_download(config, &m, &local_file) {
-                    Ok(Some(size)) => {
-                        ::log::info!("WORK: (do_download) downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
-                        m.fields.insert("size".to_string(), size.to_string());
-                        worklist.ok.push(m);
-                        ok_count += 1;
-                        bytes_in += size as u64;
-                        continue;
+                if let Some(res) = cb_handled {
+                    match res {
+                        Ok((cb_name, size)) => {
+                            ::log::info!("WORK: ({}) downloaded {} to {} ({} bytes)", cb_name, m.rel_path, local_file.display(), size);
+                            m.fields.insert("size".to_string(), size.to_string());
+                            worklist.ok.push(m);
+                            ok_count += 1;
+                            bytes_in += size as u64;
+                        }
+                        Err((cb_name, e)) => {
+                            ::log::error!("WORK: {} download failed for {}: {}", cb_name, m.rel_path, e);
+                            worklist.failed.push(m);
+                            failed_count += 1;
+                        }
                     }
-                    Ok(None) => {}
-                    Err(e) => {
-                        ::log::error!("WORK: do_download failed for {}: {}", m.rel_path, e);
-                        worklist.failed.push(m);
-                        failed_count += 1;
-                        continue;
-                    }
+                    continue;
                 }
 
                 match transfer.get(&m, &local_file).await {

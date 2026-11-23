@@ -610,6 +610,9 @@ impl Config {
                     if let Some(ref val) = v {
                         self.do_download = Some(val.to_string());
                         self.options.insert("do_download".to_string(), val.to_string());
+                        if !self.flow_callbacks.contains(val) {
+                            self.flow_callbacks.push(val.to_string());
+                        }
                     }
                     Ok(())
                 }

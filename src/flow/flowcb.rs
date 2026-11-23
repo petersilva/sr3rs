@@ -12,6 +12,7 @@ pub mod nodupe;
 pub mod gather_file;
 pub mod scheduled;
 pub mod poll;
+pub mod smc_download_cp;
 
 use crate::message::Message;
 use crate::flow::Worklist;
@@ -36,6 +37,7 @@ pub fn get_plugin(name: &str, config: &Config) -> Option<Arc<Mutex<dyn FlowCB>>>
         "file" => Some(Arc::new(Mutex::new(gather_file::GatherFilePlugin::new(config)))),
         "scheduled" => Some(Arc::new(Mutex::new(scheduled::ScheduledPlugin::new(config)))),
         "poll" => Some(Arc::new(Mutex::new(poll::PollPlugin::new(config)))),
+        "smc_download_cp" | "download_cp" => Some(Arc::new(Mutex::new(smc_download_cp::SmcDownloadCpPlugin::new(config)))),
         _ => {
             match pywrapper::PyWrapperPlugin::new(name, config) {
                 Ok(plugin) => Some(Arc::new(Mutex::new(plugin))),
@@ -229,6 +231,11 @@ pub trait FlowCB: Send + Sync {
     /// Called during the gather phase.
     async fn gather(&mut self, _worklist: &mut Worklist) -> anyhow::Result<()> {
         Ok(())
+    }
+
+    /// Custom download implementation for do_download plugins.
+    async fn download(&self, _m: &Message, _local_file: &std::path::Path) -> anyhow::Result<Option<u64>> {
+        Ok(None)
     }
 
     /// Metrics report for this plugin.
