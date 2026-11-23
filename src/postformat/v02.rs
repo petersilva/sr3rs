@@ -192,9 +192,6 @@ impl PostFormat for V02 {
         msg: &Message,
         options: &serde_json::Value,
     ) -> Option<(String, HashMap<String, String>, String)> {
-        // v02 wrapper is tricky to do fully since we don't have the python v2wrapper logic.
-        // We will output a space separated string and format headers to match v2 semantics as best we can.
-        
         let pub_time = msg.pub_time.format("%Y%m%d%H%M%S.000").to_string(); // rough approx to timev2 format
         let raw_body = format!("{} {} {}", pub_time, msg.base_url, msg.rel_path);
         
@@ -202,6 +199,37 @@ impl PostFormat for V02 {
         for (k, v) in &msg.fields {
             if !["pubTime", "baseUrl", "fileOp", "relPath", "size", "blocks", "content", "identity"].contains(&k.as_str()) {
                 headers.insert(k.clone(), v.clone());
+            }
+        }
+
+        if !msg.file_operation.is_empty() {
+            headers.insert("fileOp".to_string(), serde_json::to_string(&msg.file_operation).unwrap_or_default());
+            if msg.file_operation.contains_key("directory") {
+                headers.insert("sum".to_string(), "m".to_string());
+            } else if let Some(target) = msg.file_operation.get("link") {
+                headers.insert("link".to_string(), target.clone());
+                headers.insert("sum".to_string(), format!("L{}", hex::encode(target)));
+            } else if let Some(old) = msg.file_operation.get("rename") {
+                headers.insert("oldname".to_string(), old.clone());
+            } else if msg.file_operation.contains_key("remove") {
+                headers.insert("sum".to_string(), "R".to_string());
+            }
+        } else if !msg.identity.is_empty() {
+            if let Some(val) = msg.identity.get("md5") {
+                if let Ok(raw) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, val) {
+                    headers.insert("sum".to_string(), format!("d={}", hex::encode(raw)));
+                } else {
+                    headers.insert("sum".to_string(), format!("d={}", val));
+                }
+            } else if let Some((method, val)) = msg.identity.iter().next() {
+                let code = match method.as_str() {
+                    "sha512" => "s",
+                    "arbitrary" => "a",
+                    "random" => "0",
+                    "cod" => "z",
+                    _ => "0",
+                };
+                headers.insert("sum".to_string(), format!("{}={}", code, val));
             }
         }
         

@@ -140,6 +140,22 @@ impl LogPlugin {
         if let Some(exchange) = msg.fields.get("exchange") {
             s.push_str(&format!("exchange: {} ", exchange));
         }
+        if let Some(subtopic) = msg.delete_on_post.get("subtopic") {
+            s.push_str(&format!("subtopic: {} ", subtopic));
+        }
+        if !msg.file_operation.is_empty() {
+            let ops: Vec<&str> = msg.file_operation.keys().map(|k| k.as_str()).collect();
+            let op_str = ops.join(",");
+            if op_str == "link" {
+                s.push_str(&format!("a link to {} with baseUrl: {} ", msg.file_operation.get("link").unwrap_or(&"".to_string()), msg.base_url));
+            } else if op_str == "rename" {
+                s.push_str(&format!("a rename {} with baseUrl: {} ", msg.file_operation.get("rename").unwrap_or(&"".to_string()), msg.base_url));
+            } else {
+                s.push_str(&format!("a {} with baseUrl: {} ", op_str, msg.base_url));
+            }
+        } else {
+            s.push_str(&format!("a file with baseUrl: {} ", msg.base_url));
+        }
         s.push_str(&format!("relPath: {} ", msg.rel_path));
         if let Some(size) = msg.fields.get("size") {
             s.push_str(&format!("size: {} ", size));
@@ -259,7 +275,37 @@ impl FlowCB for LogPlugin {
             state.file_bytes += size;
 
             if self.log_events.contains("after_work") {
-                log::info!("{} ok: {} size: {}", self.action_verb, msg.rel_path, size);
+                if msg.file_operation.contains_key("directory") {
+                    let dir_path = if let (Some(new_dir), Some(new_file)) = (
+                        msg.delete_on_post.get("new_dir"),
+                        msg.delete_on_post.get("new_file")
+                    ) {
+                        if new_dir.is_empty() || new_dir == "." {
+                            new_file.clone()
+                        } else {
+                            format!("{}/{}", new_dir, new_file)
+                        }
+                    } else {
+                        msg.rel_path.clone()
+                    };
+                    log::info!("after_work directory ok: {}", dir_path);
+                } else if self.action_verb.is_empty() || self.action_verb == "written" || self.action_verb == "downloaded" {
+                    let file_path = if let (Some(new_dir), Some(new_file)) = (
+                        msg.delete_on_post.get("new_dir"),
+                        msg.delete_on_post.get("new_file")
+                    ) {
+                        if new_dir.is_empty() || new_dir == "." {
+                            new_file.clone()
+                        } else {
+                            format!("{}/{}", new_dir, new_file)
+                        }
+                    } else {
+                        msg.rel_path.clone()
+                    };
+                    log::info!("after_work written from message ok: {} size: {}Bytes ({})", file_path, size, size);
+                } else {
+                    log::info!("{} ok: {} size: {}", self.action_verb, msg.rel_path, size);
+                }
             }
         }
         Ok(())
