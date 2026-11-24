@@ -161,18 +161,26 @@ impl Transfer for SftpTransfer {
             let clean_base = base_path.trim_start_matches('/').trim_end_matches('/');
             let clean_rel = rel_path.trim_start_matches('/');
 
+            let pwd = sftp.realpath(Path::new(".")).ok();
+            let pwd_str = pwd.as_ref()
+                .map(|p| p.to_string_lossy().trim_start_matches('/').trim_end_matches('/').to_string())
+                .unwrap_or_default();
+
+            let mut target_rel = clean_rel;
+            if !pwd_str.is_empty() && target_rel.starts_with(&pwd_str) {
+                target_rel = target_rel.strip_prefix(&pwd_str).unwrap_or(target_rel).trim_start_matches('/');
+            }
+
             let full_remote_path = if !clean_base.is_empty() {
-                if clean_rel.starts_with(clean_base) {
-                    PathBuf::from("/").join(clean_rel)
+                if target_rel.starts_with(clean_base) {
+                    PathBuf::from("/").join(target_rel)
                 } else {
-                    PathBuf::from("/").join(clean_base).join(clean_rel)
+                    PathBuf::from("/").join(clean_base).join(target_rel)
                 }
+            } else if rel_path.starts_with('/') {
+                PathBuf::from(&rel_path)
             } else {
-                if rel_path.starts_with('/') {
-                    PathBuf::from(&rel_path)
-                } else {
-                    PathBuf::from(clean_rel)
-                }
+                PathBuf::from(target_rel)
             };
 
             let mut remote_file = sftp.open(&full_remote_path)?;

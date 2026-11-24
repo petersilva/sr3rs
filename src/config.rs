@@ -263,6 +263,9 @@ impl Config {
     }
 
     pub fn load(&mut self, input_path: &str) -> Result<(), ConfigError> {
+        if self.component.is_empty() {
+            self.component = crate::utils::detect_component(input_path);
+        }
         let path = self.resolve_config_path(input_path)?;
         
         // Clear before reloading to avoid duplicates
@@ -1214,14 +1217,16 @@ impl Config {
                     self.post_base_dir = Some(PathBuf::from(&post_base_url[5..]));
                 } else if post_base_url.starts_with("sftp:") {
                     if let Ok(u) = url::Url::parse(post_base_url) {
-                        self.post_base_dir = Some(PathBuf::from(u.path()));
+                        let p = u.path();
+                        if !p.is_empty() && p != "/" {
+                            self.post_base_dir = Some(PathBuf::from(p));
+                        }
                     }
                 }
             }
-        }
-
-        if self.post_base_dir.is_none() {
-            self.post_base_dir = Some(self.directory.clone());
+            if self.post_base_dir.is_none() && (self.download || ["subscribe", "post", "watch", "cpost", "cpump"].contains(&self.component.as_str())) {
+                self.post_base_dir = Some(self.directory.clone());
+            }
         }
 
         let mut vars = self.options.clone();

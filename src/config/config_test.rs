@@ -362,6 +362,7 @@ fn test_post_base_dir_derivation() {
 #[test]
 fn test_post_base_dir_default_to_directory() {
     let mut config = Config::default();
+    config.component = "subscribe".to_string();
     config.directory = PathBuf::from("/home/user/data");
     config.finalize().unwrap();
     
