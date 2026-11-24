@@ -49,7 +49,9 @@ This should install compiled binaries in ~/.cargo/bin:
 
 ```
 The main entry point is *sr3rs*, but just like the python version, there is also *sr3rs_post.*
-
+when invoking cpost and cpump subscriptions, it treats them as components, but we didn't
+bother with separate entry points, so configurations with with start|status|stop, but
+there is no sr3rs\_cpost (would be synonym of sr3rs\_post anyways.)
 
 
 ### Native Graphical UI
@@ -63,7 +65,7 @@ If you are on linux or perhaps WSL, the local ui might work. to  try it out:
 
    % git clone https://github.com/petersilva/sr3rs.git
    % cd sr3rs
-   % cargo run view
+   % cargo run ui
 
 ```
 That should start up the GUI, looking at the default location for the configuration tree: ~/.config/sr3rs.
@@ -78,7 +80,7 @@ when it isn't in the normal place (eg. ~/sr_config/ddsr ) so there is a  *config
 
 ```
 
-  % sr3rs_view --configDir=~/sr_config/ddsr
+  % sr3rs_ui --configDir=~/sr_config/ddsr
 
 
 ```
