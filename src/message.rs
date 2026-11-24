@@ -90,36 +90,25 @@ impl Message {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &std::path::Path, config: &crate::Config, base_dir: &std::path::Path) -> anyhow::Result<Self> {
-        let abs_path = std::fs::canonicalize(path).map_err(|e| anyhow::anyhow!("Failed to canonicalize path {:?}: {}", path, e))?;
+        let abs_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let abs_base_dir = std::fs::canonicalize(base_dir).unwrap_or_else(|_| base_dir.to_path_buf());
         let metadata = std::fs::metadata(&abs_path)?;
 
-        /*
-        let base_dir = config.post_base_dir.as_ref()
-            .or(Some(&config.directory))
-            .ok_or_else(|| anyhow::anyhow!("No directory or post_baseDir configured"))?;
-
-        let mut vars = std::collections::HashMap::new();
-        for (k, v) in std::env::vars() {
-            vars.insert(k, v);
-        }
-        let expanded_base_dir = crate::config::variable_expansion::expand_variables(
-            &base_dir.to_string_lossy(),
-            &vars
-        );
-
-        let abs_base_dir = std::fs::canonicalize(&expanded_base_dir).unwrap_or_else(|_| std::path::PathBuf::from(&expanded_base_dir));
-         */
-
-        let rel_path = abs_path.strip_prefix(&base_dir)
+        let rel_path = abs_path.strip_prefix(&abs_base_dir)
+            .or_else(|_| path.strip_prefix(base_dir))
             .unwrap_or_else(|_| abs_path.as_path());
-        
-        /*
-        let base_url = config.post_base_url.as_deref()
-            .unwrap_or("file://localhost/"); // Fallback
-         */
-        let base_url = format!("file:{}", base_dir.to_string_lossy() ) ;
 
-        let mut msg = Self::new( &base_url, &rel_path.to_string_lossy());
+        let base_url = if let Some(ref pbu) = config.post_base_url {
+            let mut u = pbu.clone();
+            if !u.ends_with('/') {
+                u.push('/');
+            }
+            u
+        } else {
+            format!("file:{}", abs_base_dir.to_string_lossy())
+        };
+
+        let mut msg = Self::new(&base_url, &rel_path.to_string_lossy());
         msg.fields.insert("size".to_string(), metadata.len().to_string());
 
         // identity if it is a file, fileOp if not.

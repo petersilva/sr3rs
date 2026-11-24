@@ -42,22 +42,43 @@ impl GatherFilePlugin {
     /// look for the value of each on in path;
     /// return the longest post_path that is in path.
     fn longest_base_dir(&self, path: &Path ) -> PathBuf {
-
-        let mut longest=PathBuf::from("/");
-        let mut candidates = self.config.post_paths.clone();
+        let mut longest = PathBuf::from("/");
+        let mut candidates = Vec::new();
+        for p in &self.config.post_paths {
+            if p.is_dir() {
+                candidates.push(p.clone());
+            }
+        }
+        if let Some(ref pbd) = self.config.post_base_dir {
+            candidates.push(pbd.clone());
+        }
         candidates.push( self.config.directory.clone() );
 
-        ::log::warn!("longest_base_dir: candidates: {:?}", candidates );
-        for base_dir in candidates {
-                if let Ok(rel_path) =  path.strip_prefix(&base_dir) {
-                        ::log::debug!("sub path: {}", rel_path.display());
+        let abs_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
 
-                        if base_dir.as_os_str().len() > longest.as_os_str().len() {
-                            longest=base_dir;
-                        }
+        for base_dir in candidates {
+            let abs_base = fs::canonicalize(&base_dir).unwrap_or_else(|_| base_dir.clone());
+            if let Ok(rel) = abs_path.strip_prefix(&abs_base) {
+                if !rel.as_os_str().is_empty() && abs_base.as_os_str().len() > longest.as_os_str().len() {
+                    longest = abs_base;
                 }
+            } else if let Ok(rel) = path.strip_prefix(&base_dir) {
+                if !rel.as_os_str().is_empty() && base_dir.as_os_str().len() > longest.as_os_str().len() {
+                    longest = base_dir;
+                }
+            }
         }
-        ::log::warn!( "longest base for {:?}, is {:?}", path, longest );
+        if longest == PathBuf::from("/") {
+            if let Some(ref pbd) = self.config.post_base_dir {
+                return pbd.clone();
+            }
+            if let Some(parent) = path.parent() {
+                if parent != Path::new("") && parent != Path::new(".") {
+                    return parent.to_path_buf();
+                }
+            }
+            return self.config.directory.clone();
+        }
         longest
     }
 
@@ -231,7 +252,8 @@ impl FlowCB for GatherFilePlugin {
                  for path_str in &self.config.post_paths {
                      let p = Path::new(path_str);
                      if p.exists() {
-                        let mut walked = self.walk(p,p);
+                        let base_dir = self.longest_base_dir(p);
+                        let mut walked = self.walk(p, &base_dir);
                         messages.append(&mut walked);
                      } else {
                         ::log::warn!("GatherFile: CLI path does not exist: {}", path_str.to_str().unwrap() );

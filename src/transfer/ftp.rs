@@ -172,7 +172,8 @@ impl Transfer for FtpTransfer {
             ftp.resume_transfer(remote_offset).await?;
         }
 
-        let mut reader = ftp.retr_as_stream(&rel_path).await?;
+        let full_remote_file = format!("/{}", rel_path.trim_start_matches('/'));
+        let mut reader = ftp.retr_as_stream(&full_remote_file).await?;
         let mut downloaded = 0;
         let mut buffer = [0; 16384];
 
