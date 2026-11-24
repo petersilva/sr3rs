@@ -137,7 +137,7 @@ pub trait Flow: Send + Sync {
         };
 
         ::log::info!("2nd raw_dest_dir: {:?} mirror: {:?}, dir_parts: {:?}, filename: {:?}", raw_dest_dir, mirror, dir_parts, filename);
-        if mirror && !dir_parts.is_empty() {
+        if (mirror || is_dir_msg) && !dir_parts.is_empty() {
             if !new_dir.is_empty() && new_dir != "." {
                 if !new_dir.ends_with('/') { 
                     new_dir.push('/'); 
