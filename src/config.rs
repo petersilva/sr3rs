@@ -906,13 +906,18 @@ impl Config {
                 }
                 "flowCallbackPrepend" | "callbackPrepend" => {
                     if let Some(ref val) = v {
-                        self.flow_callbacks.insert(0, val.to_string());
+                        if !self.flow_callbacks.contains(val) {
+                            self.flow_callbacks.insert(0, val.to_string());
+                        }
                     }
                     Ok(())
                 }
-                "flowCallback" | "callback" => {
+                "flowCallback" | "callback" | "plugin" | "flow_plugin" => {
                     if let Some(ref val) = v {
-                        self.flow_callbacks.push(val.to_string());
+                        self.options.insert(k.to_string(), val.to_string());
+                        if !self.flow_callbacks.contains(val) {
+                            self.flow_callbacks.push(val.to_string());
+                        }
                     }
                     Ok(())
                 }
@@ -924,7 +929,7 @@ impl Config {
                     self.options.insert("log_reject".to_string(), val_str.to_string());
                     Ok(())
                 }
-                "set" | "logEvents" | "logMessageDump" | "events" | "fileEvents" | "retryEmptyBeforeExit" | "accelFtpgetCommand" | "accelFtpputCommand" | "mdelay" | "retry_refilter" | "plugin" | "flow_plugin" | "debug" | "sum" | "inflight" => {
+                "set" | "logEvents" | "logMessageDump" | "events" | "fileEvents" | "retryEmptyBeforeExit" | "accelFtpgetCommand" | "accelFtpputCommand" | "mdelay" | "retry_refilter" | "debug" | "sum" | "inflight" => {
                     if let Some(ref val) = v {
                         self.options.insert(k.to_string(), val.to_string());
                     } else if k == "debug" {
