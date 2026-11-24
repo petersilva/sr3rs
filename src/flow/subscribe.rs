@@ -443,11 +443,32 @@ impl MothPublisher {
         }
 
         let exchanges = self.exchanges.clone();
-        for exchange in exchanges {
-            if let Err(e) = self.moth.publish(&exchange, "", msg, &self.options).await {
+        if exchanges.is_empty() {
+            return Ok(());
+        }
+
+        let target_exchanges: Vec<&String> = if exchanges.len() == 1 {
+            vec![&exchanges[0]]
+        } else {
+            let idx = if let Some(override_val) = msg.delete_on_post.get("exchangeSplitOverride") {
+                override_val.parse::<usize>().unwrap_or(0) % exchanges.len()
+            } else if !msg.rel_path.is_empty() {
+                let ascii_sum: usize = msg.rel_path.bytes().map(|b| b as usize).sum();
+                ascii_sum % exchanges.len()
+            } else if let Some(ret_path) = msg.fields.get("retrievePath") {
+                let ascii_sum: usize = ret_path.bytes().map(|b| b as usize).sum();
+                ascii_sum % exchanges.len()
+            } else {
+                0
+            };
+            vec![&exchanges[idx]]
+        };
+
+        for exchange in target_exchanges {
+            if let Err(e) = self.moth.publish(exchange, "", msg, &self.options).await {
                 log::error!("Publish failed: {}. Attempting reconnect...", e);
                 self.reconnect().await?;
-                self.moth.publish(&exchange, "", msg, &self.options).await?;
+                self.moth.publish(exchange, "", msg, &self.options).await?;
             }
         }
         Ok(())
