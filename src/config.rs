@@ -1375,6 +1375,10 @@ impl Config {
             }
         }
 
+        if self.nodupe_ttl > 0 && !self.flow_callbacks.iter().any(|c| c == "nodupe" || c.starts_with("nodupe.")) {
+            self.flow_callbacks.insert(0, "nodupe".to_string());
+        }
+
         if !self.flow_callbacks.iter().any(|c| c == "log" || c.ends_with(".Log")) {
             if let Some(pos) = self.flow_callbacks.iter().position(|c| c == "retry") {
                 self.flow_callbacks.insert(pos, "log".to_string());
