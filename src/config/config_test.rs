@@ -166,7 +166,7 @@ fn test_nodupe_ttl_parsing() {
     let mut config = Config::default();
     config.apply_component_defaults("subscribe");
     
-    assert_eq!(config.nodupe_ttl, 300);
+    assert_eq!(config.nodupe_ttl, 0);
     
     assert_eq!(parse_duration("on"), 300);
     assert_eq!(parse_duration("30m"), 1800);

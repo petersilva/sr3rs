@@ -313,6 +313,12 @@ pub trait Flow: Send + Sync {
                 };
 
                 if m.file_operation.contains_key("directory") {
+                    if !mirror {
+                        m.set_report(202, format!("skipping mkdir {}", local_file.display()));
+                        worklist.rejected.push(m);
+                        continue;
+                    }
+
                     match std::fs::create_dir_all(&local_file) {
                         Ok(_) => {
                             ::log::info!("WORK: created directory {}", local_file.display());

@@ -347,10 +347,18 @@ impl Config {
                 self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
-            "subscribe" | "sarra" => {
+            "subscribe" => {
                 self.download = true;
                 self.mirror = false;
-                self.nodupe_ttl = 300;
+                self.nodupe_ttl = 0;
+                self.flow_callbacks.push("nodupe".to_string());
+                self.flow_callbacks.push("log".to_string());
+                self.flow_callbacks.push("retry".to_string());
+            }
+            "sarra" => {
+                self.download = true;
+                self.mirror = true;
+                self.nodupe_ttl = 0;
                 self.flow_callbacks.push("nodupe".to_string());
                 self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
@@ -565,9 +573,8 @@ impl Config {
                     Ok(())
                 }
                 "acceptUnmatched" => {
-                    if let Some(ref val) = v {
-                        self.accept_unmatched = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.accept_unmatched = is_true(val_str);
                     Ok(())
                 }
                 "accelCpCommand" | "accel_cp_command" | "download_cp_command" => {
@@ -597,15 +604,13 @@ impl Config {
                     Ok(())
                 }
                 "messageDebugDump" => {
-                    if let Some(ref val) = v {
-                        self.message_debug_dump = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.message_debug_dump = is_true(val_str);
                     Ok(())
                 }
                 "download" => {
-                    if let Some(ref val) = v {
-                        self.download = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.download = is_true(val_str);
                     Ok(())
                 }
                 "do_download" => {
@@ -619,9 +624,8 @@ impl Config {
                     Ok(())
                 }
                 "mirror" => {
-                    if let Some(ref val) = v {
-                        self.mirror = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.mirror = is_true(val_str);
                     Ok(())
                 }
                 "instances" => {
@@ -785,15 +789,13 @@ impl Config {
                     Ok(())
                 }
                 "delete" => {
-                    if let Some(ref val) = v {
-                        self.delete = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.delete = is_true(val_str);
                     Ok(())
                 }
                 "dry_run" | "simulate" => {
-                    if let Some(ref val) = v {
-                        self.dry_run = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.dry_run = is_true(val_str);
                     Ok(())
                 }
                 "nodupe_ttl" | "cache" | "caching" | "nd" | "no_duplicates" | "sd" | "suppress_duplicates" => {
@@ -815,15 +817,18 @@ impl Config {
                     Ok(())
                 }
                 "overwrite" => {
-                    if let Some(ref val) = v {
-                        self.overwrite = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.overwrite = is_true(val_str);
                     Ok(())
                 }
                 "recursive" => {
-                    if let Some(ref val) = v {
-                        self.recursive = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.recursive = is_true(val_str);
+                    Ok(())
+                }
+                "timeCopy" | "time_copy" => {
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.time_copy = is_true(val_str);
                     Ok(())
                 }
                 "timeout" => {
@@ -851,15 +856,13 @@ impl Config {
                     Ok(())
                 }
                 "post_on_start" => {
-                    if let Some(ref val) = v {
-                        self.post_on_start = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.post_on_start = is_true(val_str);
                     Ok(())
                 }
                 "force_polling" => {
-                    if let Some(ref val) = v {
-                        self.force_polling = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.force_polling = is_true(val_str);
                     Ok(())
                 }
                 "identity" => {
@@ -869,9 +872,8 @@ impl Config {
                     Ok(())
                 }
                 "statehost" => {
-                    if let Some(ref val) = v {
-                        self.statehost = is_true(val);
-                    }
+                    let val_str = v.as_deref().unwrap_or("true");
+                    self.statehost = is_true(val_str);
                     Ok(())
                 }
                 "scheduled_interval" => {
