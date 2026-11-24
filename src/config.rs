@@ -347,15 +347,10 @@ impl Config {
                 self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }
-            "subscribe" => {
+            "subscribe" | "sarra" => {
                 self.download = true;
                 self.mirror = false;
-                self.flow_callbacks.push("nodupe".to_string());
-                self.flow_callbacks.push("log".to_string());
-                self.flow_callbacks.push("retry".to_string());
-            }
-            "sarra" => {
-                self.download = true;
+                self.nodupe_ttl = 300;
                 self.flow_callbacks.push("nodupe".to_string());
                 self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
@@ -801,10 +796,10 @@ impl Config {
                     }
                     Ok(())
                 }
-                "nodupe_ttl" | "caching" => {
-                    if let Some(ref val) = v {
-                        self.nodupe_ttl = parse_duration(val);
-                    }
+                "nodupe_ttl" | "cache" | "caching" | "nd" | "no_duplicates" | "sd" | "suppress_duplicates" => {
+                    let val_str = v.as_deref().unwrap_or("300");
+                    self.nodupe_ttl = parse_duration(val_str);
+                    self.options.insert("nodupe_ttl".to_string(), val_str.to_string());
                     Ok(())
                 }
                 "fileAgeMin" | "file_age_min" => {
@@ -1402,11 +1397,18 @@ pub fn is_true(s: &str) -> bool {
 
 fn parse_duration(s: &str) -> u32 {
     if s.is_empty() { return 0; }
-    let last_char = s.chars().last().unwrap();
-    if last_char.is_ascii_digit() {
-        return s.parse().unwrap_or(0);
+    let s_lower = s.to_lowercase();
+    if is_true(&s_lower) {
+        return 300;
     }
-    let val: u32 = s[..s.len()-1].parse().unwrap_or(0);
+    if s_lower == "false" || s_lower == "off" || s_lower == "no" || s_lower == "0" {
+        return 0;
+    }
+    let last_char = s_lower.chars().last().unwrap();
+    if last_char.is_ascii_digit() {
+        return s_lower.parse().unwrap_or(0);
+    }
+    let val: u32 = s_lower[..s_lower.len()-1].parse().unwrap_or(0);
     match last_char {
         's' => val,
         'm' => val * 60,
