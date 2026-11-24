@@ -98,11 +98,9 @@ pub trait Flow: Send + Sync {
         if let Some(strip_val) = msg.delete_on_post.get("_strip") {
             if let Ok(n) = strip_val.parse::<usize>() {
                 if n > 0 {
-                    let parts: Vec<&str> = rel_path.split('/').collect();
+                    let parts: Vec<&str> = rel_path.split('/').filter(|s| !s.is_empty()).collect();
                     if parts.len() > n {
                         rel_path = parts[n..].join("/");
-                    } else if !parts.is_empty() {
-                        rel_path = parts.last().unwrap().to_string(); // fallback to just filename if over-stripped
                     }
                 }
             } else {
@@ -127,15 +125,21 @@ pub trait Flow: Send + Sync {
  
         let mut new_dir = dest_dir.clone();
 
-        // let new_dir = dest_dir + rel_path
-        let parts: Vec<&str> = rel_path.split('/').collect();
-        let filename = parts.last().unwrap_or(&"");
+        let parts: Vec<&str> = rel_path.split('/').filter(|s| !s.is_empty()).collect();
+        let is_dir_msg = msg.file_operation.contains_key("directory");
 
-        ::log::info!("2nd raw_dest_dir: {:?} mirror: {:?}, parts: {:?}, filename: {:?}", raw_dest_dir, mirror, parts, filename);
-        if mirror && parts.len() > 1 {
-            let dir_parts = format!("{}",parts[..parts.len() - 1].join("/"));
+        let (dir_parts, filename) = if is_dir_msg {
+            (rel_path.clone(), "".to_string())
+        } else if parts.len() > 1 {
+            (parts[..parts.len() - 1].join("/"), parts.last().unwrap_or(&"").to_string())
+        } else {
+            ("".to_string(), parts.last().unwrap_or(&"").to_string())
+        };
+
+        ::log::info!("2nd raw_dest_dir: {:?} mirror: {:?}, dir_parts: {:?}, filename: {:?}", raw_dest_dir, mirror, dir_parts, filename);
+        if mirror && !dir_parts.is_empty() {
             if !new_dir.is_empty() && new_dir != "." {
-                if new_dir[new_dir.len()-2..new_dir.len()-1] != *"/" { 
+                if !new_dir.ends_with('/') { 
                     new_dir.push('/'); 
                 }
                 new_dir.push_str(&dir_parts);
