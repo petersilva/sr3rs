@@ -113,10 +113,49 @@ impl Message {
 
         // identity if it is a file, fileOp if not.
         if metadata.is_file() {
-            let mut id =  crate::identity::factory( &config.identity_method ).unwrap();
-            let _ = id.update_file( &abs_path.to_str().unwrap() );
-            msg.identity.insert( "method".to_string(), id.get_method() );
-            msg.identity.insert( "value".to_string(), id.value() );
+            let file_mtime_str = metadata.modified().ok().map(|mt| {
+                let dt: chrono::DateTime<chrono::Utc> = mt.into();
+                dt.to_rfc3339()
+            });
+
+            let mut fmd = crate::filemetadata::FileMetadata::new(&abs_path);
+            let cached_mtime = fmd.get_str("mtime");
+
+            let mut cached_identity_used = false;
+            if let (Some(c_mtime), Some(ref f_mtime)) = (cached_mtime, &file_mtime_str) {
+                if c_mtime >= *f_mtime {
+                    if let Some(id_val) = fmd.get("identity") {
+                        let method_match = id_val.get("method").and_then(|v| v.as_str()) == Some(&config.identity_method);
+                        if method_match {
+                            if let (Some(m), Some(v)) = (
+                                id_val.get("method").and_then(|v| v.as_str()),
+                                id_val.get("value").and_then(|v| v.as_str()),
+                            ) {
+                                msg.identity.insert("method".to_string(), m.to_string());
+                                msg.identity.insert("value".to_string(), v.to_string());
+                                cached_identity_used = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !cached_identity_used {
+                if let Some(mut id) = crate::identity::factory(&config.identity_method) {
+                    let _ = id.update_file(abs_path.to_str().unwrap_or(""));
+                    msg.identity.insert("method".to_string(), id.get_method());
+                    msg.identity.insert("value".to_string(), id.value());
+
+                    let mut id_json = serde_json::Map::new();
+                    id_json.insert("method".to_string(), serde_json::Value::String(id.get_method()));
+                    id_json.insert("value".to_string(), serde_json::Value::String(id.value()));
+                    fmd.set("identity", serde_json::Value::Object(id_json));
+                    if let Some(ref mtime_str) = file_mtime_str {
+                        fmd.set("mtime", mtime_str.clone());
+                    }
+                    let _ = fmd.persist();
+                }
+            }
         } else if metadata.is_dir() {
             msg.file_operation.insert("directory".to_string(), "".to_string() );
         } else if metadata.is_symlink() {
@@ -234,5 +273,34 @@ fn test_put_content_inline() {
     let mut msg2 = Message::new("file:/", "test.txt");
     msg2.put_content_inline(file.path(), 5); // max size 5 < 18
     assert!(!msg2.fields.contains_key("content"));
+}
+
+#[test]
+fn test_from_file_caches_identity_in_filemetadata() {
+    use tempfile::NamedTempFile;
+    use std::io::Write;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "testing identity caching").unwrap();
+    let path = file.path();
+    let parent = path.parent().unwrap();
+
+    let mut config = crate::Config::default();
+    config.identity_method = "sha512".to_string();
+
+    let msg1 = Message::from_file(path, &config, parent).unwrap();
+    assert_eq!(msg1.identity.get("method"), Some(&"sha512".to_string()));
+    let id_val1 = msg1.identity.get("value").cloned().unwrap();
+
+    // Inspect FileMetadata
+    let meta = crate::filemetadata::FileMetadata::new(path);
+    if let Some(id_val) = meta.get("identity") {
+        assert_eq!(id_val.get("method").and_then(|v| v.as_str()), Some("sha512"));
+        assert_eq!(id_val.get("value").and_then(|v| v.as_str()), Some(id_val1.as_str()));
+    }
+
+    // Call from_file a second time to ensure it reuses cached identity
+    let msg2 = Message::from_file(path, &config, parent).unwrap();
+    assert_eq!(msg2.identity.get("value"), Some(&id_val1));
 }
 }

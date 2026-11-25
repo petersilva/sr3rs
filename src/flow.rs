@@ -60,6 +60,67 @@ impl Worklist {
     }
 }
 
+pub fn set_local_file_attributes(local_file: &std::path::Path, msg: &Message, config: &Config) {
+    let mut x = crate::filemetadata::FileMetadata::new(local_file);
+
+    if let Some(onfly) = msg.fields.get("onfly_checksum") {
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(onfly) {
+            x.set("identity", json_val);
+        } else {
+            let mut id_map = serde_json::Map::new();
+            id_map.insert("value".to_string(), serde_json::Value::String(onfly.clone()));
+            x.set("identity", serde_json::Value::Object(id_map));
+        }
+    } else if !msg.identity.is_empty() {
+        let mut id_map = serde_json::Map::new();
+        for (k, v) in &msg.identity {
+            id_map.insert(k.clone(), serde_json::Value::String(v.clone()));
+        }
+        x.set("identity", serde_json::Value::Object(id_map));
+    }
+
+    if config.time_copy {
+        if let Some(mtime_str) = msg.fields.get("mtime") {
+            x.set("mtime", mtime_str.clone());
+        } else if let Ok(meta) = std::fs::metadata(local_file) {
+            if let Ok(mtime) = meta.modified() {
+                let dt: chrono::DateTime<chrono::Utc> = mtime.into();
+                x.set("mtime", dt.to_rfc3339());
+            }
+        }
+    } else if let Ok(meta) = std::fs::metadata(local_file) {
+        if let Ok(mtime) = meta.modified() {
+            let dt: chrono::DateTime<chrono::Utc> = mtime.into();
+            x.set("mtime", dt.to_rfc3339());
+        }
+    }
+
+    let _ = x.persist();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut mode = 0u32;
+        if let Some(mode_str) = msg.fields.get("mode") {
+            if mode_str.starts_with('0') {
+                mode = u32::from_str_radix(&mode_str[1..], 8).unwrap_or(0);
+            } else {
+                mode = u32::from_str_radix(mode_str, 8).unwrap_or(0);
+            }
+        }
+        if mode == 0 && config.perm_default != 0 {
+            mode = config.perm_default;
+        }
+        if mode > 0 {
+            if let Ok(metadata) = std::fs::metadata(local_file) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(mode);
+                let _ = std::fs::set_permissions(local_file, perms);
+            }
+        }
+    }
+}
+
 #[async_trait]
 pub trait Flow: Send + Sync {
     fn config(&self) -> &Config;
@@ -247,7 +308,7 @@ pub trait Flow: Send + Sync {
         ::log::info!("AcCepting!? " );
         Ok(()) 
     }
-    
+
     async fn work(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
         let config = self.config();
         if !config.download {
@@ -381,6 +442,7 @@ pub trait Flow: Send + Sync {
                         Ok(_) => {
                             ::log::info!("WORK: written from message ok: {} ({} bytes)", local_file.display(), bytes.len());
                             m.fields.insert("size".to_string(), bytes.len().to_string());
+                            set_local_file_attributes(&local_file, &m, config);
                             worklist.ok.push(m);
                             ok_count += 1;
                             bytes_in += bytes.len() as u64;
@@ -397,17 +459,60 @@ pub trait Flow: Send + Sync {
                 if local_file.is_file() {
                     if let (Some(method), Some(remote_val)) = (m.identity.get("method"), m.identity.get("value")) {
                         if method != "cod" && method != "random" {
-                            if let Some(mut id_obj) = crate::identity::factory(method) {
-                                if id_obj.update_file(local_file.to_str().unwrap_or("")).is_ok() {
-                                    let local_val = id_obj.value();
-                                    if &local_val == remote_val {
-                                        let reason = format!("same checksum {}", local_file.display());
-                                        ::log::info!("WORK: file {} already exists with same checksum, rejecting download", local_file.display());
-                                        m.set_report(304, reason);
-                                        worklist.rejected.push(m);
-                                        rejected_count += 1;
-                                        continue;
+                            let mut fmd = crate::filemetadata::FileMetadata::new(&local_file);
+                            let cached_mtime = fmd.get_str("mtime");
+                            let disk_mtime = std::fs::metadata(&local_file).ok().and_then(|meta| {
+                                meta.modified().ok().map(|mt| {
+                                    let dt: chrono::DateTime<chrono::Utc> = mt.into();
+                                    dt.to_rfc3339()
+                                })
+                            });
+
+                            let mut cached_local_val = None;
+                            if let (Some(c_mtime), Some(ref d_mtime)) = (cached_mtime, &disk_mtime) {
+                                if c_mtime >= *d_mtime {
+                                    if let Some(id_val) = fmd.get("identity") {
+                                        if id_val.get("method").and_then(|v| v.as_str()) == Some(method) {
+                                            if let Some(val) = id_val.get("value").and_then(|v| v.as_str()) {
+                                                cached_local_val = Some(val.to_string());
+                                            }
+                                        }
                                     }
+                                }
+                            }
+
+                            let local_val = match cached_local_val {
+                                Some(val) => Some(val),
+                                None => {
+                                    if let Some(mut id_obj) = crate::identity::factory(method) {
+                                        if id_obj.update_file(local_file.to_str().unwrap_or("")).is_ok() {
+                                            let val = id_obj.value();
+                                            let mut id_json = serde_json::Map::new();
+                                            id_json.insert("method".to_string(), serde_json::Value::String(method.clone()));
+                                            id_json.insert("value".to_string(), serde_json::Value::String(val.clone()));
+                                            fmd.set("identity", serde_json::Value::Object(id_json));
+                                            if let Some(ref mtime_str) = disk_mtime {
+                                                fmd.set("mtime", mtime_str.clone());
+                                            }
+                                            let _ = fmd.persist();
+                                            Some(val)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                            };
+
+                            if let Some(local_val) = local_val {
+                                if &local_val == remote_val {
+                                    let reason = format!("same checksum {}", local_file.display());
+                                    ::log::info!("WORK: file {} already exists with same checksum, rejecting download", local_file.display());
+                                    m.set_report(304, reason);
+                                    worklist.rejected.push(m);
+                                    rejected_count += 1;
+                                    continue;
                                 }
                             }
                         }
@@ -437,6 +542,7 @@ pub trait Flow: Send + Sync {
                         Ok((cb_name, size)) => {
                             ::log::info!("WORK: ({}) downloaded {} to {} ({} bytes)", cb_name, m.rel_path, local_file.display(), size);
                             m.fields.insert("size".to_string(), size.to_string());
+                            set_local_file_attributes(&local_file, &m, config);
                             worklist.ok.push(m);
                             ok_count += 1;
                             bytes_in += size as u64;
@@ -454,6 +560,7 @@ pub trait Flow: Send + Sync {
                     Ok(size) => {
                         ::log::info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
                         m.fields.insert("size".to_string(), size.to_string());
+                        set_local_file_attributes(&local_file, &m, config);
                         worklist.ok.push(m);
                         ok_count += 1;
                         bytes_in += size as u64;
