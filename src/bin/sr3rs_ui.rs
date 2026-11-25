@@ -23,6 +23,8 @@ struct Cli {
 async fn main() -> eframe::Result<()> {
     let cli = Cli::parse();
     
+    let icon = load_icon();
+
     if let Some(config_dir) = cli.config_dir {
         paths::set_config_dir_override(config_dir);
     }
@@ -30,6 +32,8 @@ async fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1024.0, 768.0])
+            .with_icon(icon)
+            .with_app_id("sr3rs_ui")
             .with_drag_and_drop(true),
         ..Default::default()
     };
@@ -54,4 +58,19 @@ async fn main() -> eframe::Result<()> {
             Box::new(app)
         }),
     )
+}
+
+
+fn load_icon() -> egui::IconData {
+    let image = image::load_from_memory(include_bytes!("../../assets/icon.png"))
+        .expect("failed to load icon")
+        .into_rgba8();
+
+    let (width, height) = image.dimensions();
+
+    egui::IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    }
 }
