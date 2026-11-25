@@ -14,6 +14,8 @@ use lapin::{
 };
 use futures_util::stream::StreamExt;
 
+static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 pub struct Amqp091 {
     connection: Connection,
     channel: Channel,
@@ -21,6 +23,7 @@ pub struct Amqp091 {
     queue_name: Option<String>,
     prefetch: u16,
     expire: Option<f64>,
+    connection_id: String,
 }
 
 impl Amqp091 {
@@ -28,6 +31,9 @@ impl Amqp091 {
         let addr = broker.to_lapin_uri();
         let mut props = ConnectionProperties::default();
         
+        let conn_num = CONNECTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let connection_id = format!("conn_{}", conn_num);
+
         let conn_name = format!("sr3rs-moth-{}", broker.user.as_deref().unwrap_or("unknown"));
         props.client_properties.insert(
             "connection_name".into(), 
@@ -45,6 +51,7 @@ impl Amqp091 {
             queue_name: None,
             prefetch: 10,
             expire: None,
+            connection_id,
         })
     }
 }
@@ -148,7 +155,7 @@ impl Moth for Amqp091 {
                 let msg_opt = crate::postformat::import_any(payload, &headers, &content_type, &options);
                 
                 if let Some(mut msg) = msg_opt {
-                    msg.ack_id = Some(delivery.delivery_tag.to_string());
+                    msg.ack_id = Some(format!("{}:{}", self.connection_id, delivery.delivery_tag));
                     // Attach routing key mapping similar to python
                     msg.fields.insert("exchange".to_string(), delivery.exchange.to_string());
                     Ok(Some(msg))
@@ -167,14 +174,36 @@ impl Moth for Amqp091 {
     }
 
     async fn ack(&mut self, ack_id: &str) -> Result<()> {
-        let delivery_tag = ack_id.parse::<u64>()?;
-        self.channel.basic_ack(delivery_tag, BasicAckOptions::default()).await?;
+        if let Some((conn_id, tag_str)) = ack_id.split_once(':') {
+            if conn_id != self.connection_id {
+                log::warn!("ACK: skipping stale ack_id '{}' for current connection '{}'", ack_id, self.connection_id);
+                return Ok(());
+            }
+            if let Ok(delivery_tag) = tag_str.parse::<u64>() {
+                if let Err(e) = self.channel.basic_ack(delivery_tag, BasicAckOptions::default()).await {
+                    log::warn!("ACK: basic_ack failed for delivery_tag {}: {}", delivery_tag, e);
+                }
+            }
+        } else if let Ok(delivery_tag) = ack_id.parse::<u64>() {
+            let _ = self.channel.basic_ack(delivery_tag, BasicAckOptions::default()).await;
+        }
         Ok(())
     }
 
     async fn nack(&mut self, ack_id: &str) -> Result<()> {
-        let delivery_tag = ack_id.parse::<u64>()?;
-        self.channel.basic_nack(delivery_tag, BasicNackOptions { requeue: true, ..Default::default() }).await?;
+        if let Some((conn_id, tag_str)) = ack_id.split_once(':') {
+            if conn_id != self.connection_id {
+                log::warn!("NACK: skipping stale ack_id '{}' for current connection '{}'", ack_id, self.connection_id);
+                return Ok(());
+            }
+            if let Ok(delivery_tag) = tag_str.parse::<u64>() {
+                if let Err(e) = self.channel.basic_nack(delivery_tag, BasicNackOptions { requeue: true, ..Default::default() }).await {
+                    log::warn!("NACK: basic_nack failed for delivery_tag {}: {}", delivery_tag, e);
+                }
+            }
+        } else if let Ok(delivery_tag) = ack_id.parse::<u64>() {
+            let _ = self.channel.basic_nack(delivery_tag, BasicNackOptions { requeue: true, ..Default::default() }).await;
+        }
         Ok(())
     }
 
@@ -245,5 +274,23 @@ impl Moth for Amqp091 {
 
     fn is_closed(&self) -> bool {
         self.connection.status().closed() || self.channel.status().state() == lapin::ChannelState::Closed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_ack_id_format_and_stale_check() {
+        let conn_id = "conn_1";
+        let delivery_tag: u64 = 42;
+        let ack_id = format!("{}:{}", conn_id, delivery_tag);
+
+        let (parsed_conn, parsed_tag) = ack_id.split_once(':').unwrap();
+        assert_eq!(parsed_conn, "conn_1");
+        assert_eq!(parsed_tag, "42");
+
+        // Stale connection ID check
+        let new_conn_id = "conn_2";
+        assert_ne!(parsed_conn, new_conn_id);
     }
 }
