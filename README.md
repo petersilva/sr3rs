@@ -3,7 +3,6 @@
 Sr3 in Rust, using AI.
 Purpose of this project is for me to learn Rust and get some experience with AI.
 
-NOT READY FOR USE. INCOMPLETE, MAY EAT YOUR DOG. Changing hourly.
 
 This is a proof of concept for now.
 
