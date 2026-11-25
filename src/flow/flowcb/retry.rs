@@ -153,8 +153,11 @@ impl FlowCB for RetryPlugin {
 
             let qty = (self.batch_size / 2).saturating_sub(wl.incoming.len());
             if qty > 0 {
-                let msgs = dl_queue.get(qty);
+                let mut msgs = dl_queue.get(qty);
                 if !msgs.is_empty() {
+                    for m in &mut msgs {
+                        Self::increment_retry_count(m);
+                    }
                     wl.incoming.extend(msgs);
                 }
             }
@@ -179,8 +182,11 @@ impl FlowCB for RetryPlugin {
                 return Ok(());
             }
 
-            let msgs = dl_queue.get(qty);
+            let mut msgs = dl_queue.get(qty);
             if !msgs.is_empty() {
+                for m in &mut msgs {
+                    Self::increment_retry_count(m);
+                }
                 wl.incoming.extend(msgs);
             }
         }
@@ -241,8 +247,11 @@ impl FlowCB for RetryPlugin {
                 return Ok(());
             }
 
-            let msgs = post_queue.get(qty);
+            let mut msgs = post_queue.get(qty);
             if !msgs.is_empty() {
+                for m in &mut msgs {
+                    Self::increment_retry_count(m);
+                }
                 ::log::debug!("loading from post retry: qty={} ... got: {}", qty, msgs.len());
                 wl.ok.extend(msgs);
             }

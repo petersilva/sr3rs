@@ -267,7 +267,10 @@ impl FlowCB for DiskNoDupePlugin {
                 }
             }
 
-            let is_retry = m.delete_on_post.contains_key("_isRetry");
+            let is_retry = m.delete_on_post.contains_key("_isRetry")
+                || m.delete_on_post.get("_isRetry").map(|s| s != "0" && !s.is_empty()).unwrap_or(false)
+                || m.delete_on_post.contains_key("_is_retry");
+
             let key = super::derive_key(&m);
             let path = if let Some(p) = m.delete_on_post.get("_nodupe_override_path") {
                 p.clone()
