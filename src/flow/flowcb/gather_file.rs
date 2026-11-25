@@ -20,6 +20,7 @@ pub struct GatherFilePlugin {
     pub primed: bool,
     pub initial_scan_done: bool,
     pub queued_messages: Vec<Message>,
+    pub pending_paths: Vec<PathBuf>,
     pub watcher: Option<RecommendedWatcher>,
     pub rx: Option<mpsc::Receiver<anyhow::Result<PathBuf>>>,
 }
@@ -32,6 +33,7 @@ impl GatherFilePlugin {
             primed: false,
             initial_scan_done: false,
             queued_messages: Vec::new(),
+            pending_paths: Vec::new(),
             watcher: None,
             rx: None,
         }
@@ -227,6 +229,7 @@ impl FlowCB for GatherFilePlugin {
 
     async fn on_start(&mut self) -> anyhow::Result<()> {
         self.queued_messages.clear();
+        self.pending_paths.clear();
         self.primed = false;
         self.initial_scan_done = false;
         self.setup_watcher()?;
@@ -244,8 +247,41 @@ impl FlowCB for GatherFilePlugin {
             return Ok(());
         }
 
-        // 2. Initial scan or polling scan
-        if !self.initial_scan_done || (self.watcher.is_none() && !self.primed) {
+        // Try setting up watcher if not active yet
+        if self.watcher.is_none() && self.rx.is_none() {
+            let _ = self.setup_watcher();
+        }
+
+        // 2. Process pending retry paths from earlier events
+        if !self.pending_paths.is_empty() {
+            let mut remaining = Vec::new();
+            let paths = std::mem::take(&mut self.pending_paths);
+            for path in paths {
+                let base_dir = self.longest_base_dir(&path);
+                if path.exists() {
+                    if path.is_dir() {
+                        let walked = self.walk(&path, &base_dir);
+                        worklist.incoming.extend(walked);
+                    } else {
+                        match self.make_message(&path, &base_dir) {
+                            Ok(msg) => {
+                                worklist.incoming.push(msg);
+                            }
+                            Err(_) => {
+                                remaining.push(path);
+                            }
+                        }
+                    }
+                }
+            }
+            self.pending_paths = remaining;
+            if !worklist.incoming.is_empty() {
+                return Ok(());
+            }
+        }
+
+        // 3. Initial scan or polling scan (when watcher is None or force_polling is True)
+        if !self.initial_scan_done || self.watcher.is_none() || self.config.force_polling {
              let mut messages = Vec::new();
              
              if !self.initial_scan_done && !self.config.post_paths.is_empty() {
@@ -259,7 +295,7 @@ impl FlowCB for GatherFilePlugin {
                         ::log::warn!("GatherFile: CLI path does not exist: {}", path_str.to_str().unwrap() );
                      }
                  }
-             } else if !self.initial_scan_done {
+             } else {
                  let watch_dir = self.config.directory.clone();
                  if watch_dir.exists() {
                      messages = self.walk(&watch_dir,&watch_dir);
@@ -288,17 +324,30 @@ impl FlowCB for GatherFilePlugin {
              return Ok(());
         }
 
-        // 3. Process kernel events if available
+        // 4. Process kernel events if available
         if let Some(mut rx) = self.rx.take() {
             let mut count = 0;
             while count < batch_size {
                 match rx.try_recv() {
                     Ok(Ok(path)) => {
-                        let base_dir=self.longest_base_dir(&path);
+                        let base_dir = self.longest_base_dir(&path);
                         if path.exists() {
-                            if let Ok(msg) = self.make_message(&path,&base_dir) {
-                                worklist.incoming.push(msg);
-                                count += 1;
+                            if path.is_dir() {
+                                let walked = self.walk(&path, &base_dir);
+                                count += walked.len();
+                                worklist.incoming.extend(walked);
+                            } else {
+                                match self.make_message(&path, &base_dir) {
+                                    Ok(msg) => {
+                                        worklist.incoming.push(msg);
+                                        count += 1;
+                                    }
+                                    Err(_) => {
+                                        if !self.pending_paths.contains(&path) {
+                                            self.pending_paths.push(path);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
