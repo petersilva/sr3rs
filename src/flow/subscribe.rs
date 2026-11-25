@@ -396,13 +396,8 @@ impl Flow for SubscribeFlow {
                 if m.delete_on_post.get("_consumer_idx") == Some(&idx_str) {
                     if let Some(ack_id) = &m.ack_id {
                         if !consumer.moth.is_closed() {
-                            let res = if m.delete_on_post.contains_key("_isRetry") {
-                                consumer.moth.ack(ack_id).await
-                            } else {
-                                consumer.moth.nack(ack_id).await
-                            };
-                            if let Err(e) = res {
-                                log::warn!("ACK/NACK (failed): failed for {}: {}", ack_id, e);
+                            if let Err(e) = consumer.moth.ack(ack_id).await {
+                                log::warn!("ACK (failed): failed for {}: {}", ack_id, e);
                                 if consumer.moth.is_closed() { break; }
                             }
                         }
