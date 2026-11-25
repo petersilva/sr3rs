@@ -53,6 +53,8 @@ pub struct Config {
     pub broker: Option<Broker>,
     pub exchange: String,
     pub exchange_suffix: Option<String>,
+    pub exchange_split: u32,
+    pub no: Option<u32>,
     pub report_exchange: Option<String>,
     pub queue_name: String,
     pub prefetch: u32,
@@ -159,6 +161,8 @@ impl Default for Config {
             buffer_size: 4192,
             exchange: "xpublic".to_string(),
             exchange_suffix: None,
+            exchange_split: 1,
+            no: None,
             report_exchange: None,
             queue_name: "q_${BROKER_USER}.${COMPONENT}.${CONFIG}.${QUEUESHARE}".to_string(),
             prefetch: 10,
@@ -449,6 +453,12 @@ impl Config {
                     }
                     Ok(())
                 }
+                "component" => {
+                    if let Some(ref val) = v {
+                        self.apply_component_defaults(val);
+                    }
+                    Ok(())
+                }
                 "feeder" | "manager" => {
                     if let Some(ref val) = v {
                         let b = Broker::parse(val).map_err(|e| ConfigError::ParseContext {
@@ -518,9 +528,21 @@ impl Config {
                     }
                     Ok(())
                 }
-                "exchangeSuffix" => {
+                "exchangeSuffix" | "exchange_suffix" => {
                     if let Some(ref val) = v {
                         self.exchange_suffix = Some(val.to_string());
+                    }
+                    Ok(())
+                }
+                "exchangeSplit" | "exchange_split" => {
+                    if let Some(ref val) = v {
+                        self.exchange_split = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "no" => {
+                    if let Some(ref val) = v {
+                        self.no = Some(parse_count(val));
                     }
                     Ok(())
                 }
@@ -1099,27 +1121,74 @@ impl Config {
     }
 
     pub fn resolve_exchange(&self) -> String {
-        let mut ex = if self.exchange != "xpublic" && self.exchange != "default" {
+        let is_default_exchange = self.exchange == "xpublic" || self.exchange == "default";
+
+        if !is_default_exchange {
             self.exchange.clone()
-        } else if let Some(broker) = &self.broker {
-            if let Some(user) = &broker.user {
-                if user != "anonymous" {
-                    format!("xs_{}", user)
+        } else {
+            let is_poll_or_post_or_watch = ["poll", "post", "watch"].contains(&self.component.as_str());
+
+            if is_poll_or_post_or_watch {
+                let mut base_ex = if let Some(post_ex) = &self.post_exchange {
+                    post_ex.clone()
+                } else {
+                    let broker_opt = self.post_broker.as_ref().or(self.broker.as_ref());
+                    if let Some(broker) = broker_opt {
+                        if let Some(user) = &broker.user {
+                            if user != "anonymous" {
+                                format!("xs_{}", user)
+                            } else {
+                                "xpublic".to_string()
+                            }
+                        } else {
+                            "xpublic".to_string()
+                        }
+                    } else {
+                        "xpublic".to_string()
+                    }
+                };
+
+                if let Some(suffix) = &self.post_exchange_suffix {
+                    base_ex = format!("{}_{}", base_ex, suffix);
+                }
+
+                if self.post_exchange_split > 1 {
+                    let instance_no = self.no.or_else(|| self.options.get("no").and_then(|v| v.parse().ok())).unwrap_or(0);
+                    if instance_no > 0 {
+                        base_ex = format!("{}{:02}", base_ex, instance_no % self.post_exchange_split);
+                    }
+                }
+
+                base_ex
+            } else {
+                let mut base_ex = if let Some(broker) = &self.broker {
+                    if let Some(user) = &broker.user {
+                        if user != "anonymous" {
+                            format!("xs_{}", user)
+                        } else {
+                            "xpublic".to_string()
+                        }
+                    } else {
+                        "xpublic".to_string()
+                    }
                 } else {
                     "xpublic".to_string()
+                };
+
+                if let Some(suffix) = &self.exchange_suffix {
+                    base_ex = format!("{}_{}", base_ex, suffix);
                 }
-            } else {
-                "xpublic".to_string()
+
+                if self.exchange_split > 1 {
+                    let instance_no = self.no.or_else(|| self.options.get("no").and_then(|v| v.parse().ok())).unwrap_or(0);
+                    if instance_no > 0 {
+                        base_ex = format!("{}{:02}", base_ex, instance_no % self.exchange_split);
+                    }
+                }
+
+                base_ex
             }
-        } else {
-            "xpublic".to_string()
-        };
-
-        if let Some(suffix) = &self.exchange_suffix {
-            ex = format!("{}_{}", ex, suffix);
         }
-
-        ex
     }
 
     fn resolve_queue_name(&self) -> String {

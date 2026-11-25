@@ -224,6 +224,56 @@ fn test_exchange_suffix_resolution() {
 }
 
 #[test]
+fn test_poll_component_exchange_resolution() {
+    let mut config = Config::default();
+    config.parse_string("component poll", "test.conf").unwrap();
+    config.parse_string("post_broker amqp://feeder@localhost/", "test.conf").unwrap();
+    config.parse_string("post_exchange my_poll_exchange", "test.conf").unwrap();
+    config.parse_string("vip 1", "test.conf").unwrap();
+    config.finalize().unwrap();
+
+    assert_eq!(config.resolve_exchange(), "my_poll_exchange");
+    assert_eq!(config.resolve_post_exchanges(), vec!["my_poll_exchange".to_string()]);
+    assert_eq!(config.publishers[0].exchange, vec!["my_poll_exchange".to_string()]);
+    assert_eq!(config.subscriptions[0].bindings[0].exchange, Some("my_poll_exchange".to_string()));
+}
+
+#[test]
+fn test_poll_component_exchange_suffix_and_split() {
+    let mut config = Config::default();
+    config.parse_string("component poll", "test.conf").unwrap();
+    config.parse_string("post_broker amqp://feeder@localhost/", "test.conf").unwrap();
+    config.parse_string("post_exchangeSuffix out", "test.conf").unwrap();
+    config.parse_string("post_exchangeSplit 4", "test.conf").unwrap();
+    config.parse_string("no 2", "test.conf").unwrap();
+    config.finalize().unwrap();
+
+    assert_eq!(config.resolve_exchange(), "xs_feeder_out02");
+    assert_eq!(
+        config.resolve_post_exchanges(),
+        vec![
+            "xs_feeder_out00".to_string(),
+            "xs_feeder_out01".to_string(),
+            "xs_feeder_out02".to_string(),
+            "xs_feeder_out03".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn test_explicit_exchange_overrides_poll_post_exchange() {
+    let mut config = Config::default();
+    config.parse_string("component poll", "test.conf").unwrap();
+    config.parse_string("post_broker amqp://feeder@localhost/", "test.conf").unwrap();
+    config.parse_string("post_exchange my_post_exchange", "test.conf").unwrap();
+    config.parse_string("exchange custom_sub_exchange", "test.conf").unwrap();
+    config.finalize().unwrap();
+
+    assert_eq!(config.resolve_exchange(), "custom_sub_exchange");
+    assert_eq!(config.resolve_post_exchanges(), vec!["my_post_exchange".to_string()]);
+}
+
+#[test]
 fn test_stable_rand() {
     use tempfile::tempdir;
     let dir = tempdir().unwrap();
