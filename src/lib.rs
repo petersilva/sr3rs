@@ -22,6 +22,7 @@ pub mod moth;
 
 pub mod identity;
 pub mod postformat;
+pub mod filemetadata;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod utils;
 pub mod ui;
