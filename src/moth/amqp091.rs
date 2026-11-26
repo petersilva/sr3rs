@@ -128,48 +128,29 @@ impl Moth for Amqp091 {
         let consumer = self.consumer.as_mut().unwrap();
         
         match consumer.next().await {
-            Some(Ok(delivery)) => {
-                let payload = &delivery.data;
-                
-                // Convert lapin properties/headers to HashMap
-                let mut headers = std::collections::HashMap::new();
-                if let Some(amqp_headers) = delivery.properties.headers() {
-                    for (k, v) in amqp_headers.inner() {
-                        let val_str = match v {
-                            lapin::types::AMQPValue::LongString(s) => s.to_string(),
-                            lapin::types::AMQPValue::ShortString(s) => s.to_string(),
-                            _ => format!("{:?}", v),
-                        };
-                        headers.insert(k.to_string(), val_str);
-                    }
-                }
-                
-                let content_type = delivery.properties.content_type().as_ref()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "".to_string());
-                
-                // Construct a fake empty JSON value to represent options right now
-                // In a complete implementation, this would be passed from config/options
-                let options = serde_json::json!({});
-                
-                let msg_opt = crate::postformat::import_any(payload, &headers, &content_type, &options);
-                
-                if let Some(mut msg) = msg_opt {
-                    msg.ack_id = Some(format!("{}:{}", self.connection_id, delivery.delivery_tag));
-                    // Attach routing key mapping similar to python
-                    msg.fields.insert("exchange".to_string(), delivery.exchange.to_string());
-                    Ok(Some(msg))
-                } else {
-                    log::error!("Failed to decode message, acknowledging and dropping.");
-                    self.channel.basic_ack(delivery.delivery_tag, BasicAckOptions::default()).await?;
-                    Ok(None)
-                }
-            }
+            Some(Ok(delivery)) => self.handle_delivery(delivery).await,
             Some(Err(e)) => Err(anyhow::Error::from(e)),
             None => {
                 self.consumer = None;
                 Ok(None)
             }
+        }
+    }
+
+    async fn consume_now(&mut self) -> Result<Option<Message>> {
+        if self.consumer.is_none() {
+            return Ok(None);
+        }
+        let consumer = self.consumer.as_mut().unwrap();
+
+        match tokio::time::timeout(tokio::time::Duration::ZERO, consumer.next()).await {
+            Ok(Some(Ok(delivery))) => self.handle_delivery(delivery).await,
+            Ok(Some(Err(e))) => Err(anyhow::Error::from(e)),
+            Ok(None) => {
+                self.consumer = None;
+                Ok(None)
+            }
+            Err(_) => Ok(None), // Zero timeout elapsed, no prefetched message available
         }
     }
 
@@ -268,12 +249,50 @@ impl Moth for Amqp091 {
     }
 
     async fn close(&mut self) -> Result<()> {
+        if let Some(consumer) = &self.consumer {
+            let _ = self.channel.basic_cancel(consumer.tag().as_str(), BasicCancelOptions::default()).await;
+        }
         self.connection.close(0, "Moth closed").await?;
         Ok(())
     }
 
     fn is_closed(&self) -> bool {
         self.connection.status().closed() || self.channel.status().state() == lapin::ChannelState::Closed
+    }
+}
+
+impl Amqp091 {
+    async fn handle_delivery(&mut self, delivery: lapin::message::Delivery) -> Result<Option<Message>> {
+        let payload = &delivery.data;
+        
+        let mut headers = std::collections::HashMap::new();
+        if let Some(amqp_headers) = delivery.properties.headers() {
+            for (k, v) in amqp_headers.inner() {
+                let val_str = match v {
+                    lapin::types::AMQPValue::LongString(s) => s.to_string(),
+                    lapin::types::AMQPValue::ShortString(s) => s.to_string(),
+                    _ => format!("{:?}", v),
+                };
+                headers.insert(k.to_string(), val_str);
+            }
+        }
+        
+        let content_type = delivery.properties.content_type().as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "".to_string());
+        
+        let options = serde_json::json!({});
+        let msg_opt = crate::postformat::import_any(payload, &headers, &content_type, &options);
+        
+        if let Some(mut msg) = msg_opt {
+            msg.ack_id = Some(format!("{}:{}", self.connection_id, delivery.delivery_tag));
+            msg.fields.insert("exchange".to_string(), delivery.exchange.to_string());
+            Ok(Some(msg))
+        } else {
+            log::error!("Failed to decode message, acknowledging and dropping.");
+            self.channel.basic_ack(delivery.delivery_tag, BasicAckOptions::default()).await?;
+            Ok(None)
+        }
     }
 }
 

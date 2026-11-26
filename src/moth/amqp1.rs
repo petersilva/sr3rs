@@ -23,6 +23,9 @@ impl Moth for Amqp1 {
     async fn consume(&mut self) -> Result<Option<Message>> {
         Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
     }
+    async fn consume_now(&mut self) -> Result<Option<Message>> {
+        Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
+    }
     async fn ack(&mut self, _ack_id: &str) -> Result<()> {
         Err(anyhow::anyhow!("AMQP 1.0 not implemented"))
     }

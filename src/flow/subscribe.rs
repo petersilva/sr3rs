@@ -71,6 +71,26 @@ impl SubscribeFlow {
         }
     }
 
+    pub async fn drain_prefetched(&self, worklist: &mut Worklist) -> anyhow::Result<usize> {
+        let mut total_drained = 0;
+        for consumer_mutex in &self.consumers {
+            let mut consumer = consumer_mutex.lock().await;
+            if consumer.moth.is_closed() {
+                continue;
+            }
+            while let Ok(Some(mut msg)) = consumer.moth.consume_now().await {
+                msg.delete_on_post.insert("_consumer_idx".to_string(), consumer.subscription_idx.to_string());
+                worklist.incoming.push(msg);
+                total_drained += 1;
+            }
+        }
+        if total_drained > 0 {
+            log::info!("FLUSH: drained {} prefetched messages from local memory buffer.", total_drained);
+            worklist.gathered_from_mq += total_drained;
+        }
+        Ok(total_drained)
+    }
+
     pub async fn connect(&mut self) -> anyhow::Result<()> {
         self.connect_full(true, true).await
     }
@@ -419,6 +439,25 @@ impl Flow for SubscribeFlow {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
+        let mut flush_wl = Worklist::new();
+        let _ = self.drain_prefetched(&mut flush_wl).await;
+        if !flush_wl.incoming.is_empty() {
+            log::info!("SHUTDOWN: flushing and processing {} prefetched messages before close...", flush_wl.incoming.len());
+            let _ = self.filter(&mut flush_wl).await;
+            let _ = self.accept(&mut flush_wl).await;
+            let _ = self.work(&mut flush_wl).await;
+            for cb_mutex in self.callbacks() {
+                let cb = cb_mutex.lock().await;
+                let _ = cb.after_work(&mut flush_wl).await;
+            }
+            let _ = self.post(&mut flush_wl).await;
+            for cb_mutex in self.callbacks() {
+                let cb = cb_mutex.lock().await;
+                let _ = cb.after_post(&mut flush_wl).await;
+            }
+            let _ = self.ack(&mut flush_wl).await;
+        }
+
         for consumer_mutex in &self.consumers {
             let mut consumer = consumer_mutex.lock().await;
             let _ = consumer.moth.close().await;

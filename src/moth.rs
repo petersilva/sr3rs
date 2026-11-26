@@ -25,6 +25,9 @@ pub trait Moth: Send + Sync {
 
     /// Get next message
     async fn consume(&mut self) -> Result<Option<Message>>;
+
+    /// Try to get next message immediately from local prefetch buffer without waiting
+    async fn consume_now(&mut self) -> Result<Option<Message>>;
     
     /// Acknowledge a message
     async fn ack(&mut self, ack_id: &str) -> Result<()>;
