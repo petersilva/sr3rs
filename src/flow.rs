@@ -589,6 +589,10 @@ pub trait Flow: Send + Sync {
                     }
                     Err(e) => {
                         ::log::error!("WORK: download failed after {} attempts for {}: {}", attempts, m.rel_path, e);
+                        for cb_mutex in self.callbacks() {
+                            let cb = cb_mutex.lock().await;
+                            let _ = cb.on_work_failed(&m).await;
+                        }
                         worklist.failed.push(m);
                         failed_count += 1;
                     }
@@ -723,6 +727,10 @@ pub trait Flow: Send + Sync {
                 }
                 next_ok.push(m);
             } else {
+                for cb_mutex in self.callbacks() {
+                    let cb = cb_mutex.lock().await;
+                    let _ = cb.on_post_failed(&m).await;
+                }
                 worklist.failed.push(m);
                 failed_count += 1;
             }

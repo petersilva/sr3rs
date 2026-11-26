@@ -5,6 +5,7 @@
 
 use crate::flow::Worklist;
 use crate::flow::flowcb::FlowCB;
+use crate::message::Message;
 use crate::Config;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -101,6 +102,24 @@ impl DiskNoDupePlugin {
         } else {
             ::log::debug!("added relpath={}", relpath);
             true // It is NOT in cache (or expired), so not_in_cache is true.
+        }
+    }
+
+    fn remove_from_cache(&self, msg: &Message) {
+        let key = super::derive_key(msg);
+        let path = if let Some(p) = msg.delete_on_post.get("_nodupe_override_path") {
+            p.clone()
+        } else {
+            msg.rel_path.trim_start_matches('/').to_string()
+        };
+
+        let mut state = self.state.lock().unwrap();
+        if let Some(kdict) = state.cache_dict.get_mut(&key) {
+            kdict.remove(&path);
+            if kdict.is_empty() {
+                state.cache_dict.remove(&key);
+            }
+            ::log::debug!("DiskNoDupePlugin: removed failed item from cache: key={} path={}", key, path);
         }
     }
 
@@ -312,6 +331,16 @@ impl FlowCB for DiskNoDupePlugin {
 
         state.last_time = now;
         state.last_count = new_count;
+        Ok(())
+    }
+
+    async fn on_work_failed(&self, msg: &Message) -> anyhow::Result<()> {
+        self.remove_from_cache(msg);
+        Ok(())
+    }
+
+    async fn on_post_failed(&self, msg: &Message) -> anyhow::Result<()> {
+        self.remove_from_cache(msg);
         Ok(())
     }
 }

@@ -219,6 +219,16 @@ pub trait FlowCB: Send + Sync {
         Ok(())
     }
 
+    /// Called when a message work/download phase fails.
+    async fn on_work_failed(&self, _msg: &Message) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Called when a message post/publish phase fails.
+    async fn on_post_failed(&self, _msg: &Message) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Called periodically for maintenance tasks.
     async fn on_housekeeping(&self) -> anyhow::Result<()> {
         Ok(())
