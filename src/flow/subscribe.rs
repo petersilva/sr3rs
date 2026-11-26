@@ -463,11 +463,41 @@ impl MothPublisher {
             vec![&exchanges[idx]]
         };
 
+        let attempts = self.options.get("attempts")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or(3)
+            .max(1);
+
         for exchange in target_exchanges {
-            if let Err(e) = self.moth.publish(exchange, "", msg, &self.options).await {
-                log::error!("Publish failed: {}. Attempting reconnect...", e);
-                self.reconnect().await?;
-                self.moth.publish(exchange, "", msg, &self.options).await?;
+            let mut last_err = None;
+            let mut published = false;
+
+            for attempt in 1..=attempts {
+                if self.moth.is_closed() {
+                    let _ = self.reconnect().await;
+                }
+
+                match self.moth.publish(exchange, "", msg, &self.options).await {
+                    Ok(_) => {
+                        published = true;
+                        break;
+                    }
+                    Err(e) => {
+                        log::warn!("Publish attempt {}/{} failed for exchange {}: {}. Retrying reconnect...", attempt, attempts, exchange, e);
+                        last_err = Some(e);
+                        let _ = self.reconnect().await;
+                        if attempt < attempts {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(250 * attempt as u64)).await;
+                        }
+                    }
+                }
+            }
+
+            if !published {
+                if let Some(e) = last_err {
+                    return Err(e);
+                }
             }
         }
         Ok(())

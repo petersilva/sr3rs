@@ -76,9 +76,13 @@ pub struct RetryPlugin {
     pub name: String,
     pub retry_refilter: bool,
     pub attempts: u32,
+    pub retry_count_max: u32,
+    pub retry_ttl: f64,
     pub batch_size: usize,
     pub download_retry: Mutex<Option<SimpleDiskQueue>>,
+    pub pending_download_retry: Mutex<Option<SimpleDiskQueue>>,
     pub post_retry: Mutex<Option<SimpleDiskQueue>>,
+    pub pending_post_retry: Mutex<Option<SimpleDiskQueue>>,
     pub cache_dir: PathBuf,
 }
 
@@ -98,9 +102,13 @@ impl RetryPlugin {
             name: "retry".to_string(),
             retry_refilter,
             attempts: config.attempts,
+            retry_count_max: config.retry_count_max,
+            retry_ttl: config.retry_ttl,
             batch_size: config.batch as usize,
             download_retry: Mutex::new(None),
+            pending_download_retry: Mutex::new(None),
             post_retry: Mutex::new(None),
+            pending_post_retry: Mutex::new(None),
             cache_dir,
         }
     }
@@ -115,6 +123,15 @@ impl RetryPlugin {
         let current = Self::get_retry_count(msg);
         msg.delete_on_post.insert("_isRetry".to_string(), (current + 1).to_string());
     }
+
+    fn is_expired(&self, msg: &Message) -> bool {
+        if self.retry_ttl > 0.0 {
+            let age = (chrono::Utc::now() - msg.pub_time).num_seconds() as f64;
+            age > self.retry_ttl
+        } else {
+            false
+        }
+    }
 }
 
 #[async_trait]
@@ -125,10 +142,14 @@ impl FlowCB for RetryPlugin {
 
     async fn on_start(&mut self) -> anyhow::Result<()> {
         let dl_path = self.cache_dir.join("work_retry.json");
+        let dl_pending_path = self.cache_dir.join("work_retry_pending.json");
         let post_path = self.cache_dir.join("post_retry.json");
+        let post_pending_path = self.cache_dir.join("post_retry_pending.json");
 
         *self.download_retry.lock().unwrap() = Some(SimpleDiskQueue::new(dl_path));
+        *self.pending_download_retry.lock().unwrap() = Some(SimpleDiskQueue::new(dl_pending_path));
         *self.post_retry.lock().unwrap() = Some(SimpleDiskQueue::new(post_path));
+        *self.pending_post_retry.lock().unwrap() = Some(SimpleDiskQueue::new(post_pending_path));
         
         ::log::debug!("RetryPlugin on_start: initialized queues in {}", self.cache_dir.display());
         Ok(())
@@ -136,7 +157,45 @@ impl FlowCB for RetryPlugin {
 
     async fn on_stop(&mut self) -> anyhow::Result<()> {
         *self.download_retry.lock().unwrap() = None;
+        *self.pending_download_retry.lock().unwrap() = None;
         *self.post_retry.lock().unwrap() = None;
+        *self.pending_post_retry.lock().unwrap() = None;
+        Ok(())
+    }
+
+    async fn on_housekeeping(&self) -> anyhow::Result<()> {
+        let mut dl_rotated = 0;
+        let mut post_rotated = 0;
+
+        // Rotate pending download retry queue to active download retry queue
+        {
+            let mut pending_guard = self.pending_download_retry.lock().unwrap();
+            let mut active_guard = self.download_retry.lock().unwrap();
+            if let (Some(pending), Some(active)) = (pending_guard.as_mut(), active_guard.as_mut()) {
+                if pending.len() > 0 {
+                    let msgs = pending.get(pending.len());
+                    dl_rotated = msgs.len();
+                    active.put_ref(&msgs);
+                }
+            }
+        }
+
+        // Rotate pending post retry queue to active post retry queue
+        {
+            let mut pending_guard = self.pending_post_retry.lock().unwrap();
+            let mut active_guard = self.post_retry.lock().unwrap();
+            if let (Some(pending), Some(active)) = (pending_guard.as_mut(), active_guard.as_mut()) {
+                if pending.len() > 0 {
+                    let msgs = pending.get(pending.len());
+                    post_rotated = msgs.len();
+                    active.put_ref(&msgs);
+                }
+            }
+        }
+
+        if dl_rotated > 0 || post_rotated > 0 {
+            ::log::info!("RetryPlugin housekeeping: rotated pending retries into active queue. dl={}, post={}", dl_rotated, post_rotated);
+        }
         Ok(())
     }
 
@@ -153,11 +212,8 @@ impl FlowCB for RetryPlugin {
 
             let qty = (self.batch_size / 2).saturating_sub(wl.incoming.len());
             if qty > 0 {
-                let mut msgs = dl_queue.get(qty);
+                let msgs = dl_queue.get(qty);
                 if !msgs.is_empty() {
-                    for m in &mut msgs {
-                        Self::increment_retry_count(m);
-                    }
                     wl.incoming.extend(msgs);
                 }
             }
@@ -182,11 +238,8 @@ impl FlowCB for RetryPlugin {
                 return Ok(());
             }
 
-            let mut msgs = dl_queue.get(qty);
+            let msgs = dl_queue.get(qty);
             if !msgs.is_empty() {
-                for m in &mut msgs {
-                    Self::increment_retry_count(m);
-                }
                 wl.incoming.extend(msgs);
             }
         }
@@ -194,7 +247,7 @@ impl FlowCB for RetryPlugin {
     }
 
     async fn after_work(&self, wl: &mut Worklist) -> anyhow::Result<()> {
-        // Messages in wl.failed go into download_retry
+        // Messages in wl.failed go into pending_download_retry
         if !wl.failed.is_empty() {
             let failed = std::mem::take(&mut wl.failed);
             let mut to_retry = Vec::new();
@@ -203,27 +256,28 @@ impl FlowCB for RetryPlugin {
             for mut m in failed {
                 Self::increment_retry_count(&mut m);
                 let count = Self::get_retry_count(&m);
-                if count < self.attempts {
-                    to_retry.push(m);
-                } else {
-                    ::log::error!("gave up after {} retries: {}/{}", count, m.base_url, m.rel_path);
+                let expired = self.is_expired(&m);
+
+                if (self.retry_count_max > 0 && count > self.retry_count_max) || expired {
+                    ::log::error!("gave up after {} retry rounds (expired={}): {}/{}", count, expired, m.base_url, m.rel_path);
                     gave_up.push(m);
+                } else {
+                    to_retry.push(m);
                 }
             }
 
             if !to_retry.is_empty() {
-                let mut dl_queue_guard = self.download_retry.lock().unwrap();
-                if let Some(dl_queue) = dl_queue_guard.as_mut() {
-                    ::log::debug!("putting {} messages into download retry queue", to_retry.len());
-                    dl_queue.put_ref(&to_retry);
+                let mut pending_guard = self.pending_download_retry.lock().unwrap();
+                if let Some(pending) = pending_guard.as_mut() {
+                    ::log::debug!("putting {} messages into pending download retry queue", to_retry.len());
+                    pending.put_ref(&to_retry);
                 }
                 // Once persisted, we move them to rejected so they get ACKed but not POSTed.
                 // They are no longer in 'failed' for this cycle, because they are 'handled' by retry.
                 wl.rejected.extend(to_retry);
             }
             
-            // The ones we gave up on go back to wl.failed. 
-            // They have _isRetry set, so ack() should know to ACK them instead of NACKing.
+            // The ones we gave up on go back to wl.failed.
             wl.failed.extend(gave_up);
         }
 
@@ -247,11 +301,8 @@ impl FlowCB for RetryPlugin {
                 return Ok(());
             }
 
-            let mut msgs = post_queue.get(qty);
+            let msgs = post_queue.get(qty);
             if !msgs.is_empty() {
-                for m in &mut msgs {
-                    Self::increment_retry_count(m);
-                }
                 ::log::debug!("loading from post retry: qty={} ... got: {}", qty, msgs.len());
                 wl.ok.extend(msgs);
             }
@@ -260,7 +311,7 @@ impl FlowCB for RetryPlugin {
     }
 
     async fn after_post(&self, wl: &mut Worklist) -> anyhow::Result<()> {
-        // Messages in wl.failed go into post_retry
+        // Messages in wl.failed go into pending_post_retry
         if !wl.failed.is_empty() {
             let failed = std::mem::take(&mut wl.failed);
             let mut to_retry = Vec::new();
@@ -269,18 +320,20 @@ impl FlowCB for RetryPlugin {
             for mut m in failed {
                 Self::increment_retry_count(&mut m);
                 let count = Self::get_retry_count(&m);
-                if count < self.attempts {
-                    to_retry.push(m);
-                } else {
-                    ::log::error!("gave up after {} retries: {}/{}", count, m.base_url, m.rel_path);
+                let expired = self.is_expired(&m);
+
+                if (self.retry_count_max > 0 && count > self.retry_count_max) || expired {
+                    ::log::error!("gave up after {} retry rounds (expired={}): {}/{}", count, expired, m.base_url, m.rel_path);
                     gave_up.push(m);
+                } else {
+                    to_retry.push(m);
                 }
             }
 
             if !to_retry.is_empty() {
-                let mut post_queue_guard = self.post_retry.lock().unwrap();
-                if let Some(post_queue) = post_queue_guard.as_mut() {
-                    post_queue.put_ref(&to_retry);
+                let mut pending_guard = self.pending_post_retry.lock().unwrap();
+                if let Some(pending) = pending_guard.as_mut() {
+                    pending.put_ref(&to_retry);
                 }
                 // For post failures, they are already "after_work", so moving to rejected is fine for ACKing.
                 wl.rejected.extend(to_retry);
@@ -295,11 +348,56 @@ impl FlowCB for RetryPlugin {
         let mut m = HashMap::new();
         
         let dl_len = self.download_retry.lock().unwrap().as_ref().map(|q| q.len()).unwrap_or(0);
+        let dl_pending_len = self.pending_download_retry.lock().unwrap().as_ref().map(|q| q.len()).unwrap_or(0);
         let post_len = self.post_retry.lock().unwrap().as_ref().map(|q| q.len()).unwrap_or(0);
+        let post_pending_len = self.pending_post_retry.lock().unwrap().as_ref().map(|q| q.len()).unwrap_or(0);
         
-        m.insert("msgs_in_download_retry".to_string(), dl_len.to_string());
-        m.insert("msgs_in_post_retry".to_string(), post_len.to_string());
+        m.insert("msgs_in_download_retry".to_string(), (dl_len + dl_pending_len).to_string());
+        m.insert("msgs_in_post_retry".to_string(), (post_len + post_pending_len).to_string());
         
         m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::flow::Worklist;
+
+    #[tokio::test]
+    async fn test_retry_plugin_housekeeping_deferral() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = Config::new();
+        config.host_dir = Some(temp_dir.path().to_string_lossy().to_string());
+        config.component = "subscribe".to_string();
+        config.configname = Some("test_retry".to_string());
+        config.retry_count_max = 5;
+
+        let mut plugin = RetryPlugin::new(&config);
+        plugin.on_start().await.unwrap();
+
+        let mut wl = Worklist::new();
+        let msg = Message::new("http://example.com", "file.txt");
+        wl.failed.push(msg);
+
+        // 1. after_work puts failed message into pending queue
+        plugin.after_work(&mut wl).await.unwrap();
+        assert_eq!(wl.rejected.len(), 1);
+        assert_eq!(wl.failed.len(), 0);
+
+        // 2. before housekeeping, after_accept should NOT pull the pending message
+        let mut wl2 = Worklist::new();
+        plugin.after_accept(&mut wl2).await.unwrap();
+        assert_eq!(wl2.incoming.len(), 0);
+
+        // 3. run on_housekeeping -> rotates pending to active
+        plugin.on_housekeeping().await.unwrap();
+
+        // 4. now after_accept SHOULD pull the message from active queue
+        plugin.after_accept(&mut wl2).await.unwrap();
+        assert_eq!(wl2.incoming.len(), 1);
+        assert_eq!(wl2.incoming[0].rel_path, "file.txt");
+
+        plugin.on_stop().await.unwrap();
     }
 }

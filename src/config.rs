@@ -102,6 +102,8 @@ pub struct Config {
 
     // Advanced options from default_options
     pub attempts: u32,
+    pub retry_count_max: u32,
+    pub retry_ttl: f64,
     pub batch: u32,
     pub delete: bool,
     pub dry_run: bool,
@@ -204,6 +206,8 @@ impl Default for Config {
             poll_url: None,
 
             attempts: 3,
+            retry_count_max: 0,
+            retry_ttl: 0.0,
             batch: 100,
             delete: false,
             dry_run: false,
@@ -811,6 +815,18 @@ impl Config {
                 "attempts" => {
                     if let Some(ref val) = v {
                         self.attempts = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "retryCountMax" | "retry_count_max" | "max_retries" => {
+                    if let Some(ref val) = v {
+                        self.retry_count_max = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "retryTTL" | "retry_ttl" => {
+                    if let Some(ref val) = v {
+                        self.retry_ttl = parse_duration(val) as f64;
                     }
                     Ok(())
                 }

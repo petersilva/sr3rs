@@ -559,7 +559,26 @@ pub trait Flow: Send + Sync {
                     continue;
                 }
 
-                match transfer.get(&m, &local_file).await {
+                let attempts = config.attempts.max(1);
+                let mut transfer_res = None;
+                for attempt in 1..=attempts {
+                    match transfer.get(&m, &local_file).await {
+                        Ok(size) => {
+                            transfer_res = Some(Ok(size));
+                            break;
+                        }
+                        Err(e) => {
+                            if attempt < attempts {
+                                ::log::warn!("WORK: download attempt {}/{} failed for {}: {}. Retrying...", attempt, attempts, m.rel_path, e);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                            } else {
+                                transfer_res = Some(Err(e));
+                            }
+                        }
+                    }
+                }
+
+                match transfer_res.unwrap() {
                     Ok(size) => {
                         ::log::info!("WORK: downloaded {} to {} ({} bytes)", m.rel_path, local_file.display(), size);
                         m.fields.insert("size".to_string(), size.to_string());
@@ -569,7 +588,7 @@ pub trait Flow: Send + Sync {
                         bytes_in += size as u64;
                     }
                     Err(e) => {
-                        ::log::error!("WORK: download failed for {}: {}", m.rel_path, e);
+                        ::log::error!("WORK: download failed after {} attempts for {}: {}", attempts, m.rel_path, e);
                         worklist.failed.push(m);
                         failed_count += 1;
                     }
