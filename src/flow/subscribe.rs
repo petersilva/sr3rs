@@ -488,14 +488,28 @@ impl MothPublisher {
         let target_exchanges: Vec<&String> = if exchanges.len() == 1 {
             vec![&exchanges[0]]
         } else {
+            let split_path = if let Some(p) = msg.delete_on_post.get("_post_rel_path") {
+                p.clone()
+            } else if !msg.rel_path.is_empty() {
+                msg.rel_path.clone()
+            } else if let Some(p) = msg.fields.get("retrievePath") {
+                p.clone()
+            } else if let (Some(dir), Some(file)) = (msg.delete_on_post.get("new_dir"), msg.delete_on_post.get("new_file")) {
+                if dir.is_empty() || dir == "." {
+                    file.clone()
+                } else {
+                    format!("{}/{}", dir, file)
+                }
+            } else {
+                String::new()
+            };
+
             let idx = if let Some(override_val) = msg.delete_on_post.get("exchangeSplitOverride") {
                 override_val.parse::<usize>().unwrap_or(0) % exchanges.len()
-            } else if !msg.rel_path.is_empty() {
-                let ascii_sum: usize = msg.rel_path.bytes().map(|b| b as usize).sum();
-                ascii_sum % exchanges.len()
-            } else if let Some(ret_path) = msg.fields.get("retrievePath") {
-                let ascii_sum: usize = ret_path.bytes().map(|b| b as usize).sum();
-                ascii_sum % exchanges.len()
+            } else if !split_path.is_empty() {
+                let mut crc = flate2::Crc::new();
+                crc.update(split_path.as_bytes());
+                (crc.sum() as usize) % exchanges.len()
             } else {
                 0
             };

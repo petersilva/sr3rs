@@ -1229,7 +1229,7 @@ impl Config {
         
         let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
         let hostname = "localhost".to_string();
-        let queue_share = format!("{}_{}_{}", user, hostname, self.rand8);
+        let queue_share = format!("{}_{}", user, hostname);
         
         vars.insert("QUEUESHARE".to_string(), queue_share);
         vars.insert("HOSTNAME".to_string(), hostname);

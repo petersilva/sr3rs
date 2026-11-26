@@ -679,6 +679,11 @@ pub trait Flow: Send + Sync {
     }
 
     async fn post(&self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        if !self.config().is_active() {
+            ::log::debug!("POST: component is passive, skipping post.");
+            return Ok(());
+        }
+
         let publishers = self.publishers();
         if publishers.is_empty() {
             return Ok(());
