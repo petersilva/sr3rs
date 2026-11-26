@@ -137,6 +137,10 @@ impl Flow for SenderFlow {
         self.base.callbacks.clone()
     }
 
+    fn last_post_time(&self) -> Arc<Mutex<std::time::Instant>> {
+        self.base.last_post_time.clone()
+    }
+
     async fn connect_exchanges(&mut self) -> anyhow::Result<()> {
         let publishers_config = self.base.config.publishers.clone();
         for p_cfg in publishers_config {

@@ -46,6 +46,10 @@ struct Cli {
     #[arg(long = "messageCountMax", global = true)]
     message_count_max: Option<usize>,
 
+    /// Maximum message rate in messages per second
+    #[arg(long = "messageRateMax", global = true, alias = "message_rate_max")]
+    message_rate_max: Option<f64>,
+
     /// Declare users as well as exchanges and queues
     #[arg(long, global = true)]
     users: bool,
@@ -377,6 +381,9 @@ async fn main() -> Result<()> {
             config.load(config_file)?;
             if let Some(m) = cli.message_count_max {
                 config.message_count_max = m as u32;
+            }
+            if let Some(r) = cli.message_rate_max {
+                config.message_rate_max = r;
             }
 
             config.finalize()?;

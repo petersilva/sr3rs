@@ -302,10 +302,11 @@ impl FlowCB for DiskNoDupePlugin {
         Self::save(&mut state, now);
         
         let new_count = state.count;
-        if new_count > 0 {
-            ::log::info!(
-                "was {}, but since {:.2} sec, increased up to {}, now saved {} entries",
-                state.last_count, now - state.last_time, count, new_count
+        let elapsed = now - state.last_time;
+        if state.last_count > 0 || count > 0 || new_count > 0 {
+            crate::info!(
+                "was {}, but since {:5.2} sec, increased up to {}, now saved {} entries",
+                state.last_count, elapsed, count, new_count
             );
         }
 

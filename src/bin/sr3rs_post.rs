@@ -36,6 +36,10 @@ struct Cli {
     #[arg(long = "messageCountMax", global = true)]
     message_count_max: Option<usize>,
 
+    /// Maximum message rate in messages per second
+    #[arg(long = "messageRateMax", global = true, alias = "message_rate_max")]
+    message_rate_max: Option<f64>,
+
     /// Override the default configuration directory
     #[arg(long = "configDir", alias = "config_dir")]
     config_dir: Option<PathBuf>,
@@ -71,6 +75,9 @@ async fn main() -> Result<()> {
         config_obj.load(&config_file)?;
         if let Some(m) = cli.message_count_max {
             config_obj.message_count_max = m as u32;
+        }
+        if let Some(r) = cli.message_rate_max {
+            config_obj.message_rate_max = r;
         }
 
         config_obj.finalize()?;

@@ -8,6 +8,79 @@ use crate::config::paths;
 use anyhow::Result;
 use glob::glob;
 
+/// Generic logging macro that automatically captures the calling routine name as the target.
+#[macro_export]
+macro_rules! sr3_log {
+    ($level:expr, $($arg:tt)+) => {{
+        struct Helper;
+        let full_path = std::any::type_name::<Helper>();
+        let target = full_path.strip_suffix("::Helper").unwrap_or(full_path);
+        ::log::log!(target: target, $level, $($arg)+);
+    }};
+}
+
+#[macro_export]
+macro_rules! info {
+    ($($arg:tt)+) => {
+        $crate::sr3_log!(::log::Level::Info, $($arg)+);
+    };
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($($arg:tt)+) => {
+        $crate::sr3_log!(::log::Level::Warn, $($arg)+);
+    };
+}
+
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)+) => {
+        $crate::sr3_log!(::log::Level::Error, $($arg)+);
+    };
+}
+
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)+) => {
+        $crate::sr3_log!(::log::Level::Debug, $($arg)+);
+    };
+}
+
+#[macro_export]
+macro_rules! trace {
+    ($($arg:tt)+) => {
+        $crate::sr3_log!(::log::Level::Trace, $($arg)+);
+    };
+}
+
+pub fn clean_target(raw: &str) -> String {
+    let mut s = raw;
+    while let Some(idx) = s.rfind("::{{closure}}") {
+        s = &s[..idx];
+    }
+    
+    if s.starts_with('<') {
+        if let Some(gt_pos) = s.find(">::") {
+            let func_name = &s[gt_pos + 3..];
+            let type_part = &s[1..gt_pos];
+            let actual_type = if let Some(as_pos) = type_part.find(" as ") {
+                &type_part[..as_pos]
+            } else {
+                type_part
+            };
+            if let Some(last_colon) = actual_type.rfind("::") {
+                let mod_path = &actual_type[..last_colon];
+                return format!("{}::{}", mod_path, func_name);
+            } else {
+                return format!("{}::{}", actual_type, func_name);
+            }
+        }
+    }
+    
+    s.to_string()
+}
+
 pub fn setup_logging(level: log::LevelFilter, log_file: Option<PathBuf>) -> Result<()> {
     let mut dispatch = fern::Dispatch::new()
         .format(|out, message, record| {
@@ -15,7 +88,7 @@ pub fn setup_logging(level: log::LevelFilter, log_file: Option<PathBuf>) -> Resu
                 "{} [{}] {} {}",
                 chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%Z"),
                 record.level(),
-                record.target(),
+                clean_target(record.target()),
                 message
             ))
         })
@@ -290,6 +363,15 @@ pub fn get_state(config_file: &str) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_clean_target() {
+        let raw = "<sr3rs::flow::flowcb::nodupe::disk::DiskNoDupePlugin as sr3rs::flow::flowcb::FlowCB>::on_housekeeping::{{closure}}";
+        assert_eq!(clean_target(raw), "sr3rs::flow::flowcb::nodupe::disk::on_housekeeping");
+
+        let raw_mod = "sr3rs::flow::flowcb::log";
+        assert_eq!(clean_target(raw_mod), "sr3rs::flow::flowcb::log");
+    }
 
     #[test]
     fn test_resolve_patterns_fallback_cpost() {

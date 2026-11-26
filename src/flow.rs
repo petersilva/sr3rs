@@ -128,6 +128,9 @@ pub trait Flow: Send + Sync {
     fn metrics(&self) -> Arc<Mutex<Metrics>>;
     fn publishers(&self) -> Vec<Arc<Mutex<crate::flow::subscribe::MothPublisher>>> { Vec::new() }
     fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> { Vec::new() }
+    fn last_post_time(&self) -> Arc<Mutex<std::time::Instant>> {
+        Arc::new(Mutex::new(std::time::Instant::now()))
+    }
     
     async fn gather(&self, worklist: &mut Worklist) -> anyhow::Result<()>;
     
@@ -656,11 +659,29 @@ pub trait Flow: Send + Sync {
              return Ok(());
         }
 
+        let rate_max = config.message_rate_max;
+        if rate_max > 0.0 && !worklist.ok.is_empty() {
+            let est_duration = worklist.ok.len() as f64 / rate_max;
+            if est_duration >= 1.0 {
+                crate::info!("messageRateMax {:.1} m/s pacing {} messages over {:.2}s", rate_max, worklist.ok.len(), est_duration);
+            }
+        }
+
+        let last_post_arc = self.last_post_time();
         let mut next_ok = Vec::new();
         let mut failed_count = 0;
         let mut bytes_out = 0;
 
         for m in worklist.ok.drain(..) {
+            if rate_max > 0.0 {
+                let min_interval = std::time::Duration::from_secs_f64(1.0 / rate_max);
+                let mut last = last_post_arc.lock().await;
+                let elapsed = last.elapsed();
+                if elapsed < min_interval {
+                    tokio::time::sleep(min_interval - elapsed).await;
+                }
+                *last = std::time::Instant::now();
+            }
 
             ::log::info!( "posting message: {:?}", m);
             let mut failed_indices = Vec::new();
@@ -726,6 +747,7 @@ pub trait Flow: Send + Sync {
 
 
     async fn run_once(&self, worklist: &mut Worklist) -> anyhow::Result<usize> {
+        let cycle_start = std::time::Instant::now();
         let config = self.config();
         let active = config.is_active();
         
@@ -789,6 +811,19 @@ pub trait Flow: Send + Sync {
         // Ensure worklist is clear for the next run_once iteration, 
         // even if the specific Flow implementation of ack() didn't clear it.
         worklist.clear();
+
+        let rate_max = config.message_rate_max;
+        if rate_max > 0.0 && processed > 0 {
+            let min_duration = processed as f64 / rate_max;
+            let elapsed = cycle_start.elapsed().as_secs_f64();
+            if elapsed < min_duration {
+                let sleep_needed = min_duration - elapsed;
+                if sleep_needed >= 0.001 {
+                    crate::info!("messageRateMax {:.1} m/s exceeded, sleeping {:.2}s", rate_max, sleep_needed);
+                    tokio::time::sleep(tokio::time::Duration::from_secs_f64(sleep_needed)).await;
+                }
+            }
+        }
         
         Ok(processed)
     }
@@ -962,6 +997,7 @@ pub struct BaseFlow {
     pub logger: Arc<Mutex<FlowLog>>,
     pub metrics: Arc<Mutex<Metrics>>,
     pub callbacks: Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>>,
+    pub last_post_time: Arc<Mutex<std::time::Instant>>,
 }
 
 impl BaseFlow {
@@ -981,6 +1017,7 @@ impl BaseFlow {
             logger: Arc::new(Mutex::new(FlowLog::new())),
             metrics: Arc::new(Mutex::new(Metrics::new())),
             callbacks,
+            last_post_time: Arc::new(Mutex::new(std::time::Instant::now())),
         }
     }
 }
@@ -1001,6 +1038,10 @@ impl Flow for BaseFlow {
 
     fn callbacks(&self) -> Vec<Arc<Mutex<dyn crate::flow::flowcb::FlowCB>>> {
         self.callbacks.clone()
+    }
+
+    fn last_post_time(&self) -> Arc<Mutex<std::time::Instant>> {
+        self.last_post_time.clone()
     }
 
     async fn gather(&self, _worklist: &mut Worklist) -> anyhow::Result<()> { Ok(()) }

@@ -78,6 +78,7 @@ pub struct Config {
     pub instances: u32,
     pub housekeeping: u32, // seconds
     pub message_count_max: u32,
+    pub message_rate_max: f64,
     pub max_inflight_messages: u32,
 
     pub log_level: String,
@@ -185,6 +186,7 @@ impl Default for Config {
             instances: 1,
             housekeeping: 300,
             message_count_max: 0,
+            message_rate_max: 0.0,
             message_debug_dump: false,
             log_level: "info".to_string(),
             credentials: CredentialDb::new(),
@@ -727,6 +729,14 @@ impl Config {
                 "messageCountMax" => {
                     if let Some(ref val) = v {
                         self.message_count_max = parse_count(val);
+                    }
+                    Ok(())
+                }
+                "messageRateMax" | "message_rate_max" | "messageratemax" => {
+                    if let Some(ref val) = v {
+                        if let Ok(r) = val.parse::<f64>() {
+                            self.message_rate_max = r;
+                        }
                     }
                     Ok(())
                 }

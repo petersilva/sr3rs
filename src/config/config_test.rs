@@ -174,6 +174,15 @@ fn test_nodupe_ttl_parsing() {
 }
 
 #[test]
+fn test_message_rate_max_parsing() {
+    let mut config = Config::default();
+    assert_eq!(config.message_rate_max, 0.0);
+    
+    config.parse_string("messageRateMax 10.5", "test.conf").unwrap();
+    assert_eq!(config.message_rate_max, 10.5);
+}
+
+#[test]
 fn test_subscription() {
     let mut config = Config::default();
     config.component = "subscribe".to_string();
