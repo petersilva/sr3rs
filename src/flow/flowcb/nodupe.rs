@@ -41,6 +41,10 @@ pub fn derive_key(msg: &Message) -> String {
 
     let path = if let Some(p) = msg.fields.get("_nodupe_override_path") {
         p.clone()
+    } else if let Some(p) = msg.delete_on_post.get("_nodupe_override_path") {
+        p.clone()
+    } else if let Some(p) = msg.delete_on_post.get("_post_rel_path") {
+        p.clone()
     } else {
         msg.rel_path.clone()
     };

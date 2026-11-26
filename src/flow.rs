@@ -218,11 +218,21 @@ pub trait Flow: Send + Sync {
         ::log::info!(" new_dir: {:?}, filename: {:?}", new_dir, filename);
 
         let new_full_path = if new_dir.is_empty() || new_dir == "." {
-             filename.to_string()
+             PathBuf::from(&filename)
         } else {
-             format!("{}/{}", new_dir, filename)
+             PathBuf::from(&new_dir).join(&filename)
         };
-        ::log::info!(" post_base_dir: {:?}, new_full_path: {:?}", config.post_base_dir, new_full_path);
+
+        let base_dir_opt = config.post_base_dir.as_ref()
+            .or_else(|| config.publishers.first().and_then(|p| p.base_dir.as_ref()));
+
+        if let Some(base_dir) = base_dir_opt {
+            if let Ok(new_rel) = new_full_path.strip_prefix(base_dir) {
+                msg.delete_on_post.insert("_post_rel_path".to_string(), new_rel.to_string_lossy().into_owned());
+            }
+        }
+
+        ::log::info!(" post_base_dir: {:?}, new_full_path: {:?}, rel_path: {:?}", config.post_base_dir, new_full_path, msg.rel_path);
         ::log::info!("message_adjust_filter END" );
 
     }
