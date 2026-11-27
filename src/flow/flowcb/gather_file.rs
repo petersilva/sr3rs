@@ -181,8 +181,8 @@ impl GatherFilePlugin {
             return Ok(());
         }
 
-        // If sleep < 0 (interactive post), don't start a watcher.
-        if self.config.sleep < 0.0 {
+        // If sleep <= 0 or directory is not explicitly set (defaulting to "."), don't start a watcher.
+        if self.config.sleep <= 0.0 || self.config.directory.as_os_str().is_empty() || self.config.directory == Path::new(".") {
             return Ok(());
         }
 
@@ -309,7 +309,7 @@ impl FlowCB for GatherFilePlugin {
                         ::log::warn!("GatherFile: CLI path does not exist: {}", path_str.to_str().unwrap() );
                      }
                  }
-             } else {
+             } else if !self.config.directory.as_os_str().is_empty() && self.config.directory != Path::new(".") {
                  let watch_dir = self.config.directory.clone();
                  if watch_dir.exists() {
                      messages = self.walk(&watch_dir,&watch_dir);
