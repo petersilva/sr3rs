@@ -395,6 +395,19 @@ async fn main() -> Result<()> {
             // Save state for foreground run
             config.save_state()?;
 
+            let is_interactive = (component == "post" || component == "cpost") && config.sleep <= 0.0;
+
+            let pid_file = if !is_interactive {
+                let p = paths::get_pid_filename(config.host_dir.as_deref(), &component, config.configname.as_deref(), 1);
+                if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+                if let Ok(mut f) = std::fs::File::create(&p) {
+                    let _ = write!(f, "{}", std::process::id());
+                }
+                Some(p)
+            } else {
+                None
+            };
+
             let token = tokio_util::sync::CancellationToken::new();
             let token_clone = token.clone();
             tokio::spawn(async move {
@@ -403,19 +416,24 @@ async fn main() -> Result<()> {
                 token_clone.cancel();
             });
 
-            match component.as_str() {
+            let res = match component.as_str() {
                 "sender" => {
                     let mut flow = SenderFlow::new(config);
                     flow.connect_full(true, true).await?;
-                    flow.run_with_shutdown(token).await?;
+                    flow.run_with_shutdown(token).await
                 }
                 "subscribe" | "shovel" | "post" | "sarra" | "report" | "poll" | "watch" | "winnow" | "cpost" | "cpump" => {
                     let mut flow = SubscribeFlow::new(config);
                     flow.connect().await?;
-                    flow.run_with_shutdown(token).await?;
+                    flow.run_with_shutdown(token).await
                 }
                 _ => anyhow::bail!("Unsupported component: {}", component),
+            };
+
+            if let Some(ref p) = pid_file {
+                let _ = std::fs::remove_file(p);
             }
+            res?;
         }
         Commands::Start { config_patterns } => {
             setup_logging(log_level, None)?;
@@ -468,10 +486,9 @@ async fn main() -> Result<()> {
                         let _ = std::fs::create_dir_all(parent);
                     }
 
-                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config.configname.as_deref(), i);
-                    if pid_file.exists() {
+                    if let Some(pid_file) = paths::find_pid_filename(config.host_dir.as_deref(), &comp, config.configname.as_deref(), i) {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.parse::<i32>() {
+                            if let Ok(pid) = pid_str.trim().parse::<i32>() {
                                 if is_process_running(pid) {
                                     continue;
                                 }

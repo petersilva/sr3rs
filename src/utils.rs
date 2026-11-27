@@ -374,6 +374,15 @@ pub fn find_stray_processes() -> Vec<StrayProcess> {
                 }
             }
 
+            // Ignore interactive/one-shot post commands (without run-instance and without sleep > 0)
+            let is_interactive_post = (name.contains("sr3rs_post") || component.as_deref() == Some("post") || component.as_deref() == Some("cpost"))
+                && !cmd.iter().any(|arg| arg == "run-instance")
+                && !cmd.iter().any(|arg| arg.contains("sleep"));
+
+            if is_interactive_post {
+                continue;
+            }
+
             if !strays.iter().any(|s: &StrayProcess| s.pid == u_pid) {
                 strays.push(StrayProcess {
                     pid: u_pid,

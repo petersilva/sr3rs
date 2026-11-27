@@ -93,20 +93,26 @@ async fn main() -> Result<()> {
         let mut flow = SubscribeFlow::new(config_obj.clone());
         flow.connect().await?;
 
-        let pid_file = sr3rs::config::paths::get_pid_filename(
-            config_obj.host_dir.as_deref(),
-            &comp,
-            config_obj.configname.as_deref(),
-            1,
-        );
-        if let Some(parent) = pid_file.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(mut f) = std::fs::File::create(&pid_file) {
-            let _ = write!(f, "{}", std::process::id());
-        }
+        let is_daemon = config_obj.sleep > 0.0;
+        let pid_file = if is_daemon {
+            let p = sr3rs::config::paths::get_pid_filename(
+                config_obj.host_dir.as_deref(),
+                &comp,
+                config_obj.configname.as_deref(),
+                1,
+            );
+            if let Some(parent) = p.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(mut f) = std::fs::File::create(&p) {
+                let _ = write!(f, "{}", std::process::id());
+            }
+            Some(p)
+        } else {
+            None
+        };
 
-        let run_res = if config_obj.sleep > 0.0 {
+        let run_res = if is_daemon {
             log::info!("sleep > 0.0 ({}s): running as continuous watcher for {}.", config_obj.sleep, config_file);
             let token = tokio_util::sync::CancellationToken::new();
             let token_clone = token.clone();
@@ -134,7 +140,9 @@ async fn main() -> Result<()> {
             res
         };
 
-        let _ = std::fs::remove_file(&pid_file);
+        if let Some(ref p) = pid_file {
+            let _ = std::fs::remove_file(p);
+        }
         run_res?;
     }
 

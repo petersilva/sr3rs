@@ -439,6 +439,11 @@ impl Flow for SubscribeFlow {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
+        for cb_mutex in self.callbacks() {
+            let mut cb = cb_mutex.lock().await;
+            let _ = cb.on_stop().await;
+        }
+
         let mut flush_wl = Worklist::new();
         let _ = self.drain_prefetched(&mut flush_wl).await;
         if !flush_wl.incoming.is_empty() {

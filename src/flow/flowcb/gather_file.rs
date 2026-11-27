@@ -238,7 +238,15 @@ impl FlowCB for GatherFilePlugin {
         self.pending_paths.clear();
         self.primed = false;
         self.initial_scan_done = false;
-        self.setup_watcher()?;
+        if self.config.sleep > 0.0 {
+            let _ = self.setup_watcher();
+        }
+        Ok(())
+    }
+
+    async fn on_stop(&mut self) -> anyhow::Result<()> {
+        self.watcher = None;
+        self.rx = None;
         Ok(())
     }
 
@@ -253,8 +261,8 @@ impl FlowCB for GatherFilePlugin {
             return Ok(());
         }
 
-        // Try setting up watcher if not active yet
-        if self.watcher.is_none() && self.rx.is_none() {
+        // Try setting up watcher if not active yet and sleep > 0
+        if self.config.sleep > 0.0 && self.watcher.is_none() && self.rx.is_none() {
             let _ = self.setup_watcher();
         }
 

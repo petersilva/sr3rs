@@ -470,6 +470,10 @@ impl Flow for SenderFlow {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
+        for cb_mutex in self.callbacks() {
+            let mut cb = cb_mutex.lock().await;
+            let _ = cb.on_stop().await;
+        }
         for consumer_mutex in &self.consumers {
             let mut consumer = consumer_mutex.lock().await;
             let _ = consumer.moth.close().await;
