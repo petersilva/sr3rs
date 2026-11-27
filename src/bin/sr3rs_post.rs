@@ -5,6 +5,7 @@
 
 use clap::Parser;
 use std::path::PathBuf;
+use std::io::Write;
 use sr3rs::Config;
 use sr3rs::flow::{Flow, subscribe::SubscribeFlow, Worklist};
 use sr3rs::utils::{setup_logging, resolve_patterns};
@@ -92,7 +93,20 @@ async fn main() -> Result<()> {
         let mut flow = SubscribeFlow::new(config_obj.clone());
         flow.connect().await?;
 
-        if config_obj.sleep > 0.0 {
+        let pid_file = sr3rs::config::paths::get_pid_filename(
+            config_obj.host_dir.as_deref(),
+            &comp,
+            config_obj.configname.as_deref(),
+            1,
+        );
+        if let Some(parent) = pid_file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut f) = std::fs::File::create(&pid_file) {
+            let _ = write!(f, "{}", std::process::id());
+        }
+
+        let run_res = if config_obj.sleep > 0.0 {
             log::info!("sleep > 0.0 ({}s): running as continuous watcher for {}.", config_obj.sleep, config_file);
             let token = tokio_util::sync::CancellationToken::new();
             let token_clone = token.clone();
@@ -102,21 +116,26 @@ async fn main() -> Result<()> {
                 token_clone.cancel();
             });
 
-            flow.run_with_shutdown(token).await?;
+            flow.run_with_shutdown(token).await
         } else {
             let mut total_count = 0;
-            loop {
+            let res = loop {
                 let mut worklist = Worklist::new();
-                let batch_count = flow.run_once(&mut worklist).await?;
-                if batch_count == 0 {
-                    break;
-                };
-                total_count += batch_count;
+                match flow.run_once(&mut worklist).await {
+                    Ok(0) => break Ok(()),
+                    Ok(batch_count) => total_count += batch_count,
+                    Err(e) => break Err(e),
+                }
+            };
+            if res.is_ok() {
+                log::info!("Successfully announced {} files using {}.", total_count, config_file);
             }
+            let _ = flow.shutdown().await;
+            res
+        };
 
-            log::info!("Successfully announced {} files using {}.", total_count, config_file);
-            flow.shutdown().await?;
-        }
+        let _ = std::fs::remove_file(&pid_file);
+        run_res?;
     }
 
     Ok(())

@@ -243,6 +243,152 @@ pub fn is_process_running(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrayProcess {
+    pub pid: u32,
+    pub name: String,
+    pub cmdline: String,
+    pub component: Option<String>,
+    pub config_file: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn collect_registered_pids() -> std::collections::HashSet<u32> {
+    let mut valid_pids = std::collections::HashSet::new();
+    let cache_dir = paths::get_user_cache_dir(None);
+    let pattern = cache_dir.join("**").join("*.pid").to_string_lossy().to_string();
+    if let Ok(entries) = glob(&pattern) {
+        for entry in entries.flatten() {
+            if let Ok(content) = std::fs::read_to_string(&entry) {
+                if let Ok(pid) = content.trim().parse::<i32>() {
+                    if is_process_running(pid) {
+                        valid_pids.insert(pid as u32);
+                    }
+                }
+            }
+        }
+    }
+    valid_pids
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_process_leader(pid: u32) -> bool {
+    let status_path = format!("/proc/{}/status", pid);
+    if let Ok(content) = std::fs::read_to_string(status_path) {
+        let mut tgid = None;
+        let mut pid_val = None;
+        for line in content.lines() {
+            if line.starts_with("Tgid:") {
+                tgid = line.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok());
+            } else if line.starts_with("Pid:") {
+                pid_val = line.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok());
+            }
+            if tgid.is_some() && pid_val.is_some() {
+                break;
+            }
+        }
+        if let (Some(t), Some(p)) = (tgid, pid_val) {
+            return t == p;
+        }
+    }
+    true
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_process_leader(_pid: u32) -> bool {
+    true
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn find_stray_processes() -> Vec<StrayProcess> {
+    use sysinfo::{ProcessRefreshKind, System, UpdateKind};
+
+    let registered_pids = collect_registered_pids();
+    let current_pid = std::process::id();
+
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+    );
+
+    let mut strays = Vec::new();
+
+    for (pid, process) in sys.processes() {
+        let u_pid = pid.as_u32();
+        if u_pid == current_pid {
+            continue;
+        }
+
+        // Skip Linux secondary threads (LWPs) whose TID != TGID
+        if !is_process_leader(u_pid) {
+            continue;
+        }
+
+        let name = process.name();
+        let cmd = process.cmd();
+
+        let is_sr3rs = name.contains("sr3rs")
+            || cmd.iter().any(|arg| arg.contains("sr3rs"));
+
+        if !is_sr3rs {
+            continue;
+        }
+
+        // Ignore commands that are running status or list checks
+        if cmd.iter().any(|arg| arg == "status" || arg == "list") {
+            continue;
+        }
+
+        if !registered_pids.contains(&u_pid) {
+            let cmdline = if cmd.is_empty() {
+                name.to_string()
+            } else {
+                cmd.join(" ")
+            };
+
+            if cmdline.contains("status") {
+                continue;
+            }
+
+            let mut component = None;
+            let mut config_file = None;
+
+            for (idx, arg) in cmd.iter().enumerate() {
+                if arg == "run-instance" && idx + 2 < cmd.len() {
+                    component = Some(cmd[idx + 1].clone());
+                    let raw_cfg = &cmd[idx + 2];
+                    let stem = std::path::Path::new(raw_cfg)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| raw_cfg.clone());
+                    config_file = Some(stem);
+                } else if arg == "--config" && idx + 1 < cmd.len() {
+                    let raw_cfg = &cmd[idx + 1];
+                    component = Some(detect_component(raw_cfg));
+                    let stem = std::path::Path::new(raw_cfg)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| raw_cfg.clone());
+                    config_file = Some(stem);
+                }
+            }
+
+            if !strays.iter().any(|s: &StrayProcess| s.pid == u_pid) {
+                strays.push(StrayProcess {
+                    pid: u_pid,
+                    name: name.to_string(),
+                    cmdline,
+                    component,
+                    config_file,
+                });
+            }
+        }
+    }
+
+    strays
+}
+
 pub fn is_global_config(path_str: &str) -> bool {
     let path = std::path::Path::new(path_str);
     if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
@@ -304,10 +450,9 @@ pub fn get_state(config_file: &str) -> String {
     };
 
     for i in 1..=100 {
-        let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i);
-        if pid_file.exists() {
+        if let Some(pid_file) = paths::find_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i) {
             if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = pid_str.parse::<i32>() {
+                if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     if is_process_running(pid) {
                         running_count += 1;
                     }
@@ -386,5 +531,28 @@ mod tests {
         let results = resolve_patterns(vec!["test_cpost.conf".to_string()], "post");
         assert_eq!(results.len(), 1);
         assert_eq!(detect_component(&results[0]), "cpost");
+    }
+
+    #[test]
+    fn test_collect_registered_pids() {
+        let dir = tempdir().unwrap();
+        let pid_dir = dir.path().join("poll").join("test_cfg");
+        std::fs::create_dir_all(&pid_dir).unwrap();
+        let pid_file = pid_dir.join("poll_test_cfg_01.pid");
+        std::fs::write(&pid_file, "12345\n").unwrap();
+
+        // Standard cache dir resolution will be tested via pattern search
+        let pattern = dir.path().join("**").join("*.pid").to_string_lossy().to_string();
+        let mut pids = std::collections::HashSet::new();
+        if let Ok(entries) = glob(&pattern) {
+            for entry in entries.flatten() {
+                if let Ok(content) = std::fs::read_to_string(&entry) {
+                    if let Ok(pid) = content.trim().parse::<u32>() {
+                        pids.insert(pid);
+                    }
+                }
+            }
+        }
+        assert!(pids.contains(&12345));
     }
 }

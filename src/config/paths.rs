@@ -89,6 +89,30 @@ pub fn get_pid_filename(host_dir: Option<&str>, component: &str, configuration: 
         .join(format!("{}_{}_{:02}.pid", component, config_part, instance))
 }
 
+pub fn find_pid_filename(host_dir: Option<&str>, component: &str, configuration: Option<&str>, instance: u32) -> Option<PathBuf> {
+    let p1 = get_pid_filename(host_dir, component, configuration, instance);
+    if p1.exists() {
+        return Some(p1);
+    }
+    
+    if host_dir.is_none() {
+        if let Ok(h) = hostname::get() {
+            let h_str = h.to_string_lossy();
+            let p2 = get_pid_filename(Some(&h_str), component, configuration, instance);
+            if p2.exists() {
+                return Some(p2);
+            }
+        }
+    } else {
+        let p3 = get_pid_filename(None, component, configuration, instance);
+        if p3.exists() {
+            return Some(p3);
+        }
+    }
+
+    None
+}
+
 pub fn get_metrics_dir(host_dir: Option<&str>) -> PathBuf {
     get_user_cache_dir(host_dir).join("metrics")
 }
@@ -99,4 +123,28 @@ pub fn get_metrics_filename(host_dir: Option<&str>, component: &str, configurati
         .unwrap_or_default();
     
     get_metrics_dir(host_dir).join(format!("{}{}_{:02}.json", component, config_part, instance))
+}
+
+pub fn find_metrics_filename(host_dir: Option<&str>, component: &str, configuration: Option<&str>, instance: u32) -> Option<PathBuf> {
+    let m1 = get_metrics_filename(host_dir, component, configuration, instance);
+    if m1.exists() {
+        return Some(m1);
+    }
+
+    if host_dir.is_none() {
+        if let Ok(h) = hostname::get() {
+            let h_str = h.to_string_lossy();
+            let m2 = get_metrics_filename(Some(&h_str), component, configuration, instance);
+            if m2.exists() {
+                return Some(m2);
+            }
+        }
+    } else {
+        let m3 = get_metrics_filename(None, component, configuration, instance);
+        if m3.exists() {
+            return Some(m3);
+        }
+    }
+
+    None
 }

@@ -273,10 +273,9 @@ async fn cleanup_config(config_file: &str) -> Option<PathBuf> {
     let mut stopped_count = 0;
     let instances = if config_loaded { config.instances } else { 1 };
     for i in 1..=100 { 
-        let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i);
-        if pid_file.exists() {
+        if let Some(pid_file) = paths::find_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i) {
             if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = pid_str.parse::<i32>() {
+                if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     if is_process_running(pid) {
                         unsafe { libc::kill(pid, libc::SIGTERM); }
                         stopped_count += 1;
@@ -520,13 +519,13 @@ async fn main() -> Result<()> {
 
                 let mut stopped_count = 0;
                 for i in 1..=100 { 
-                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name, i);
-                    if pid_file.exists() {
-                        let pid_str = std::fs::read_to_string(&pid_file)?;
-                        if let Ok(pid) = pid_str.parse::<i32>() {
-                            if is_process_running(pid) {
-                                unsafe { libc::kill(pid, libc::SIGTERM); }
-                                stopped_count += 1;
+                    if let Some(pid_file) = paths::find_pid_filename(config.host_dir.as_deref(), &comp, config_name, i) {
+                        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                                if is_process_running(pid) {
+                                    unsafe { libc::kill(pid, libc::SIGTERM); }
+                                    stopped_count += 1;
+                                }
                             }
                         }
                         let _ = std::fs::remove_file(pid_file);
@@ -596,8 +595,7 @@ async fn main() -> Result<()> {
                 };
 
                 for i in 1..=100 {
-                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i);
-                    if pid_file.exists() {
+                    if let Some(pid_file) = paths::find_pid_filename(config.host_dir.as_deref(), &comp, config_name.as_deref(), i) {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.trim().parse::<i32>() {
                                 if is_process_running(pid) {
@@ -658,8 +656,7 @@ async fn main() -> Result<()> {
 
                 if let Some(ref c_name) = config_name {
                     for i in 1..=100 {
-                        let metrics_file = paths::get_metrics_filename(config.host_dir.as_deref(), &comp, Some(c_name), i);
-                        if metrics_file.exists() {
+                        if let Some(metrics_file) = paths::find_metrics_filename(config.host_dir.as_deref(), &comp, Some(c_name), i) {
                             if let Ok(content) = std::fs::read_to_string(metrics_file) {
                                 if let Ok(metrics) = serde_json::from_str::<serde_json::Value>(&content) {
                                     if let Some(flow) = metrics.get("flow") {
@@ -696,6 +693,22 @@ async fn main() -> Result<()> {
 
                 let name = format!("{}/{}", comp, config_name.as_deref().unwrap_or("unknown"));
                 println!("{:<35} {:<10} {:<10} {:<10} {:<10}", name, state, format!("{}/{}", running_count, expected_count), msg_rate, last_hk);
+            }
+
+            let strays = sr3rs::utils::find_stray_processes();
+            if !strays.is_empty() {
+                println!();
+                println!("Stray Processes (running without pidfile):");
+                println!("{:<8} {:<30} {}", "PID", "Component/Config", "Command");
+                println!("{:<8} {:<30} {}", "---", "----------------", "-------");
+                for s in strays {
+                    let target = match (&s.component, &s.config_file) {
+                        (Some(c), Some(f)) => format!("{}/{}", c, f),
+                        (Some(c), None) => c.clone(),
+                        _ => "unknown".to_string(),
+                    };
+                    println!("{:<8} {:<30} {}", s.pid, target, s.cmdline);
+                }
             }
 
             println!();
@@ -758,10 +771,9 @@ async fn main() -> Result<()> {
                 // Check if any instances are running
                 let mut running = false;
                 for i in 1..=config.instances {
-                    let pid_file = paths::get_pid_filename(config.host_dir.as_deref(), &comp, Some(config_name), i);
-                    if pid_file.exists() {
+                    if let Some(pid_file) = paths::find_pid_filename(config.host_dir.as_deref(), &comp, Some(config_name), i) {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.parse::<i32>() {
+                            if let Ok(pid) = pid_str.trim().parse::<i32>() {
                                 if is_process_running(pid) {
                                     running = true;
                                     break;
