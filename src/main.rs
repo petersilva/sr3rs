@@ -517,22 +517,67 @@ async fn main() -> Result<()> {
                     let _ = std::fs::remove_file(state_file);
                 }
 
-                let mut stopped_count = 0;
+                let mut pids_to_stop: Vec<(i32, Option<PathBuf>)> = Vec::new();
+
                 for i in 1..=100 { 
                     if let Some(pid_file) = paths::find_pid_filename(config.host_dir.as_deref(), &comp, config_name, i) {
                         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.trim().parse::<i32>() {
                                 if is_process_running(pid) {
-                                    unsafe { libc::kill(pid, libc::SIGTERM); }
-                                    stopped_count += 1;
+                                    pids_to_stop.push((pid, Some(pid_file.clone())));
+                                } else {
+                                    let _ = std::fs::remove_file(pid_file);
                                 }
                             }
                         }
-                        let _ = std::fs::remove_file(pid_file);
                     } else if i > config.instances {
                         break;
                     }
                 }
+
+                // Also check for strays matching this component/config
+                let strays = sr3rs::utils::find_stray_processes();
+                for stray in strays {
+                    if stray.component.as_deref() == Some(&comp) && stray.config_file.as_deref() == config_name {
+                        let p_i32 = stray.pid as i32;
+                        if !pids_to_stop.iter().any(|(p, _)| *p == p_i32) && is_process_running(p_i32) {
+                            pids_to_stop.push((p_i32, None));
+                        }
+                    }
+                }
+
+                let mut stopped_count = 0;
+                if !pids_to_stop.is_empty() {
+                    for (pid, _) in &pids_to_stop {
+                        unsafe { libc::kill(*pid, libc::SIGTERM); }
+                    }
+
+                    // Wait up to 3 seconds for processes to exit
+                    let start = std::time::Instant::now();
+                    while start.elapsed() < std::time::Duration::from_secs(3) {
+                        if !pids_to_stop.iter().any(|(p, _)| is_process_running(*p)) {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+
+                    // Escalate to SIGKILL if any process failed to exit
+                    for (pid, _) in &pids_to_stop {
+                        if is_process_running(*pid) {
+                            unsafe { libc::kill(*pid, libc::SIGKILL); }
+                        }
+                    }
+
+                    // Clean up PID files
+                    for (_, pid_file) in &pids_to_stop {
+                        if let Some(pf) = pid_file {
+                            let _ = std::fs::remove_file(pf);
+                        }
+                    }
+
+                    stopped_count = pids_to_stop.len();
+                }
+
                 if stopped_count > 0 {
                     println!("Stopped {} instance(s) of {}.", stopped_count, config_file);
                 } else {
