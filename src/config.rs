@@ -397,6 +397,7 @@ impl Config {
             }
             "shovel" | "cpump" | "report"  => {
                 self.download = false;
+                self.flow_callbacks.push("nodupe".to_string());
                 self.flow_callbacks.push("log".to_string());
                 self.flow_callbacks.push("retry".to_string());
             }

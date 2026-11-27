@@ -228,7 +228,9 @@ pub trait Flow: Send + Sync {
 
         if let Some(base_dir) = base_dir_opt {
             if let Ok(new_rel) = new_full_path.strip_prefix(base_dir) {
-                msg.delete_on_post.insert("_post_rel_path".to_string(), new_rel.to_string_lossy().into_owned());
+                let p_str = new_rel.to_string_lossy().into_owned();
+                msg.delete_on_post.insert("_post_rel_path".to_string(), p_str.clone());
+                msg.fields.insert("_post_rel_path".to_string(), p_str);
             }
         }
 
@@ -888,57 +890,57 @@ pub trait Flow: Send + Sync {
         }
 
         loop {
-            tokio::select! {
-                _ = token.cancelled() => {
-                    ::log::info!("Shutdown requested. Finalizing...");
-                    self.housekeeping().await?;
-                    for cb_mutex in self.callbacks() {
-                        let mut cb = cb_mutex.lock().await;
-                        cb.on_stop().await?;
-                    }
-                    self.shutdown().await?;
-                    break;
+            if token.is_cancelled() {
+                ::log::info!("Shutdown requested. Finalizing...");
+                if !worklist.incoming.is_empty() || !worklist.ok.is_empty() || !worklist.failed.is_empty() {
+                    let _ = self.ack(&mut worklist).await;
+                    worklist.clear();
                 }
-        
-                res = self.run_once(&mut worklist) => {
-                    let count = res?;
-                    total_messages += count;
-        
-                    // Stop if message limit reached
-                    if message_count_max > 0 && total_messages >= message_count_max {
-                        ::log::info!(
-                            "{} messages processed >= messageCountMax {}. Shutting down...",
-                            total_messages,
-                            message_count_max
-                        );
+                self.housekeeping().await?;
+                for cb_mutex in self.callbacks() {
+                    let mut cb = cb_mutex.lock().await;
+                    cb.on_stop().await?;
+                }
+                self.shutdown().await?;
+                break;
+            }
+
+            let count = self.run_once(&mut worklist).await?;
+            total_messages += count;
+
+            // Stop if message limit reached
+            if message_count_max > 0 && total_messages >= message_count_max {
+                ::log::info!(
+                    "{} messages processed >= messageCountMax {}. Shutting down...",
+                    total_messages,
+                    message_count_max
+                );
+                self.housekeeping().await?;
+                for cb_mutex in self.callbacks() {
+                    let mut cb = cb_mutex.lock().await;
+                    cb.on_stop().await?;
+                }
+                self.shutdown().await?;
+                break;
+            }
+
+            // idle detection 
+            if count == 0 {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        ::log::info!("Shutdown requested during sleep. Finalizing...");
                         self.housekeeping().await?;
                         for cb_mutex in self.callbacks() {
                             let mut cb = cb_mutex.lock().await;
                             cb.on_stop().await?;
                         }
                         self.shutdown().await?;
-                        break;
+                        return Ok(());
                     }
-        
-                    // idle detection 
-                    if count == 0 {
-                        tokio::select! {
-                            _ = token.cancelled() => {
-                                ::log::info!("Shutdown requested during sleep. Finalizing...");
-                                self.housekeeping().await?;
-                                for cb_mutex in self.callbacks() {
-                                    let mut cb = cb_mutex.lock().await;
-                                    cb.on_stop().await?;
-                                }
-                                self.shutdown().await?;
-                                return Ok(());
-                            }
-        
-                            _ = tokio::time::sleep(
-                                tokio::time::Duration::from_secs_f64(self.config().sleep)
-                            ) => {}
-                        }
-                    }
+
+                    _ = tokio::time::sleep(
+                        tokio::time::Duration::from_secs_f64(self.config().sleep)
+                    ) => {}
                 }
             }
         
@@ -1278,6 +1280,7 @@ mod tests {
         let mut config = Config::new();
         config.download = true;
         config.do_download = Some("smc_download_cp".to_string());
+        config.flow_callbacks.push("smc_download_cp".to_string());
         config.options.insert("download_cp_command".to_string(), "cp --preserve=timestamps".to_string());
 
         let flow = BaseFlow::new(config);

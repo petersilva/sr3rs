@@ -458,6 +458,9 @@ impl Flow for SubscribeFlow {
             let _ = self.ack(&mut flush_wl).await;
         }
 
+        // Yield/sleep briefly to allow Lapin's channel TCP actor to flush all basic_ack frames to RabbitMQ before socket closure
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
         for consumer_mutex in &self.consumers {
             let mut consumer = consumer_mutex.lock().await;
             let _ = consumer.moth.close().await;

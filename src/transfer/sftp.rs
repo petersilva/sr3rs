@@ -14,6 +14,18 @@ use ssh2_config_rs::SshConfig;
 use ssh2_config_rs::ParseRule;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::collections::HashMap;
+use lazy_static::lazy_static;
+
+struct CachedSftpSession {
+    _session: Session,
+    sftp: ssh2::Sftp,
+}
+
+lazy_static! {
+    static ref SFTP_CACHE: Mutex<HashMap<String, CachedSftpSession>> = Mutex::new(HashMap::new());
+}
 
 pub struct SftpTransfer {
     config: Config,
@@ -24,6 +36,19 @@ impl SftpTransfer {
         Self {
             config: config.clone(),
         }
+    }
+
+    fn get_sftp(&self, base_url: &str) -> anyhow::Result<()> {
+        let mut cache = SFTP_CACHE.lock().unwrap();
+        if let Some(cached) = cache.get(base_url) {
+            if cached.sftp.realpath(Path::new(".")).is_ok() {
+                return Ok(());
+            }
+        }
+        let sess = self.connect_to(base_url)?;
+        let sftp = sess.sftp()?;
+        cache.insert(base_url.to_string(), CachedSftpSession { _session: sess, sftp });
+        Ok(())
     }
 
     fn connect_to(&self, url_str: &str) -> anyhow::Result<Session> {
@@ -150,40 +175,39 @@ impl Transfer for SftpTransfer {
         
         let self_clone = Self::new(&self.config);
         tokio::task::spawn_blocking(move || {
-            let sess = self_clone.connect_to(&base_url)?;
-            let sftp = sess.sftp()?;
+            self_clone.get_sftp(&base_url)?;
+            let cache = SFTP_CACHE.lock().unwrap();
+            let cached = cache.get(&base_url).ok_or_else(|| anyhow::anyhow!("SFTP cache missing for {}", base_url))?;
+            let sftp = &cached.sftp;
 
             let remote_url = match url::Url::parse(&base_url) {
                 Ok(u) => u,
                 Err(_) => return Err(anyhow::anyhow!("Invalid base_url: {}", base_url)),
             };
+
             let base_path = remote_url.path();
             let clean_base = base_path.trim_start_matches('/').trim_end_matches('/');
             let clean_rel = rel_path.trim_start_matches('/');
 
-            let pwd = sftp.realpath(Path::new(".")).ok();
-            let pwd_str = pwd.as_ref()
-                .map(|p| p.to_string_lossy().trim_start_matches('/').trim_end_matches('/').to_string())
-                .unwrap_or_default();
+            let is_absolute = base_url.ends_with('/') || base_path.ends_with('/');
 
-            let mut target_rel = clean_rel;
-            if !pwd_str.is_empty() && target_rel.starts_with(&pwd_str) {
-                target_rel = target_rel.strip_prefix(&pwd_str).unwrap_or(target_rel).trim_start_matches('/');
-            }
-
-            let full_remote_path = if !clean_base.is_empty() {
-                if target_rel.starts_with(clean_base) {
-                    PathBuf::from("/").join(target_rel)
+            let full_remote_path = if is_absolute {
+                if !clean_base.is_empty() {
+                    PathBuf::from("/").join(clean_base).join(clean_rel)
                 } else {
-                    PathBuf::from("/").join(clean_base).join(target_rel)
+                    PathBuf::from("/").join(clean_rel)
                 }
-            } else if rel_path.starts_with('/') {
-                PathBuf::from(&rel_path)
             } else {
-                PathBuf::from(target_rel)
+                let pwd = sftp.realpath(Path::new(".")).unwrap_or_else(|_| PathBuf::from("/"));
+                if !clean_base.is_empty() {
+                    pwd.join(clean_base).join(clean_rel)
+                } else {
+                    pwd.join(clean_rel)
+                }
             };
 
-            let mut remote_file = sftp.open(&full_remote_path)?;
+            let mut remote_file = sftp.open(&full_remote_path)
+                .or_else(|_| sftp.open(Path::new(&clean_rel)))?;
             
             // Ensure parent directory exists
             if let Some(parent) = local_path.parent() {
