@@ -107,12 +107,18 @@ impl GatherFilePlugin {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() {
+                let is_symlink = entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false);
+
+                if is_symlink && !self.config.follow_symlinks {
+                    if let Ok(msg) = self.make_message(&path, base_dir) {
+                        messages.push(msg);
+                    }
+                } else if path.is_dir() {
                     if self.config.recursive {
                         let mut sub = self.walk(&path, base_dir);
                         messages.append(&mut sub);
                     }
-                } else if path.is_file() {
+                } else if path.is_file() || is_symlink {
                     if let Ok(msg) = self.make_message(&path, base_dir) {
                         messages.push(msg);
                     }

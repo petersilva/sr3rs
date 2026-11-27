@@ -113,6 +113,7 @@ pub struct Config {
     pub file_age_max: f64,
     pub overwrite: bool,
     pub recursive: bool,
+    pub follow_symlinks: bool,
     pub timeout: u32,
     pub sleep: f64,
     pub perm_default: u32,
@@ -217,6 +218,7 @@ impl Default for Config {
             file_age_max: 0.0,
             overwrite: true,
             recursive: true,
+            follow_symlinks: false,
             timeout: 300,
             sleep: 0.1,
             perm_default: 0,
@@ -810,6 +812,12 @@ impl Config {
                 "pollUrl" => {
                     if let Some(ref val) = v {
                         self.poll_url = Some(val.to_string());
+                    }
+                    Ok(())
+                }
+                "followSymlinks" | "follow_symlinks" => {
+                    if let Some(ref val) = v {
+                        self.follow_symlinks = is_true(val);
                     }
                     Ok(())
                 }

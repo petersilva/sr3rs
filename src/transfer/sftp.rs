@@ -158,9 +158,10 @@ impl SftpTransfer {
         let path = dir_path.to_path_buf();
         let self_clone = Self::new(&self.config);
         tokio::task::spawn_blocking(move || {
-            let sess = self_clone.connect_to(&url)?;
-            let sftp = sess.sftp()?;
-            let entries = sftp.readdir(&path)?;
+            self_clone.get_sftp(&url)?;
+            let cache = SFTP_CACHE.lock().unwrap();
+            let cached = cache.get(&url).ok_or_else(|| anyhow::anyhow!("SFTP cache missing for {}", url))?;
+            let entries = cached.sftp.readdir(&path)?;
             Ok(entries)
         }).await?
     }
