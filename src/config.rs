@@ -1052,7 +1052,16 @@ impl Config {
             
             let exchange = exchange.unwrap_or_else(|| self.resolve_exchange());
             let topic = topic.unwrap_or_else(|| {
-                let mut parts = self.topic_prefix.clone();
+                let parts_vec = if let Some(ref ptp) = self.post_topic_prefix {
+                    if !ptp.is_empty() && (self.component == "poll" || self.component == "post" || self.component == "cpost") {
+                        ptp.clone()
+                    } else {
+                        self.topic_prefix.clone()
+                    }
+                } else {
+                    self.topic_prefix.clone()
+                };
+                let mut parts = parts_vec;
                 parts.push("#".to_string());
                 parts.join(".")
             });
