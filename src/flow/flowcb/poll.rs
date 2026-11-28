@@ -92,6 +92,11 @@ impl FlowCB for PollPlugin {
     }
 
     async fn gather(&mut self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        if !self.config.is_active() {
+            log::debug!("POLL: component is passive (no VIP), skipping remote polling.");
+            return Ok(());
+        }
+
         let poll_url_str = match &self.config.poll_url {
             Some(u) => u.clone(),
             None => {

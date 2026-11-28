@@ -157,6 +157,10 @@ impl FlowCB for ScheduledPlugin {
     }
 
     async fn gather(&mut self, worklist: &mut Worklist) -> anyhow::Result<()> {
+        if !self.config.is_active() {
+            return Ok(());
+        }
+
         if self.ready_to_gather() {
             for rel_path in &self.config.post_paths {
                 match Message::from_file(std::path::Path::new(rel_path), &self.config, std::path::Path::new(rel_path)) {
