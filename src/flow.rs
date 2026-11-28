@@ -839,11 +839,13 @@ pub trait Flow: Send + Sync {
             logger.after_work(self.config(), worklist);
         }
 
-        self.post(worklist).await?;
-        
-        for cb_mutex in self.callbacks() {
-            let cb = cb_mutex.lock().await;
-            cb.after_post(worklist).await?;
+        if active {
+            self.post(worklist).await?;
+            
+            for cb_mutex in self.callbacks() {
+                let cb = cb_mutex.lock().await;
+                cb.after_post(worklist).await?;
+            }
         }
         
         // Count how many we actually processed in this cycle.
