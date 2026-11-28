@@ -294,11 +294,11 @@ impl FlowCB for GatherFilePlugin {
             }
         }
 
-        // 3. Initial scan or polling scan (when watcher is None or force_polling is True)
-        if !self.initial_scan_done || self.watcher.is_none() || self.config.force_polling {
+        // 3. Initial scan (runs only once when initial_scan_done is false)
+        if !self.initial_scan_done {
              let mut messages = Vec::new();
              
-             if !self.initial_scan_done && !self.config.post_paths.is_empty() {
+             if !self.config.post_paths.is_empty() {
                  for path_str in &self.config.post_paths {
                      let p = Path::new(path_str);
                      if p.exists() {
@@ -316,7 +316,7 @@ impl FlowCB for GatherFilePlugin {
                  }
              }
 
-             if !self.initial_scan_done && !self.config.post_on_start && self.config.post_paths.is_empty() {
+             if !self.config.post_on_start && self.config.post_paths.is_empty() {
                  ::log::info!("GatherFile: initial scan done, ignoring {} existing files (post_on_start is False)", messages.len());
                  self.initial_scan_done = true;
                  self.primed = true;
