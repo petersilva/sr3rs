@@ -340,6 +340,7 @@ impl Flow for SubscribeFlow {
                     Ok(Ok(Some(mut msg))) => {
                         log::debug!("GATHER: received message");
                         msg.delete_on_post.insert("_consumer_idx".to_string(), consumer.subscription_idx.to_string());
+                        msg.delete_on_post.insert("_gathered_from_mq".to_string(), "true".to_string());
                         worklist.incoming.push(msg);
                         count += 1;
                         total_gathered += 1;

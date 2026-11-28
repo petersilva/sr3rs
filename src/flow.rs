@@ -693,12 +693,6 @@ pub trait Flow: Send + Sync {
 
         let config = self.config();
         
-        // Loopback protection for poll: only post if we didn't just ingest these from the queue.
-        if config.component == "poll" && worklist.gathered_from_mq > 0 {
-             ::log::debug!("POST: loopback protection active, skipping post of {} messages ingested from queue.", worklist.ok.len());
-             return Ok(());
-        }
-
         let rate_max = config.message_rate_max;
         if rate_max > 0.0 && !worklist.ok.is_empty() {
             let est_duration = worklist.ok.len() as f64 / rate_max;
@@ -713,6 +707,12 @@ pub trait Flow: Send + Sync {
         let mut bytes_out = 0;
 
         for m in worklist.ok.drain(..) {
+            if config.component == "poll" && m.delete_on_post.contains_key("_gathered_from_mq") {
+                ::log::debug!("POST: message came from MQ loopback subscription, skipping re-post: {}", m.rel_path);
+                next_ok.push(m);
+                continue;
+            }
+
             if rate_max > 0.0 {
                 let min_interval = std::time::Duration::from_secs_f64(1.0 / rate_max);
                 let mut last = last_post_arc.lock().await;
@@ -723,7 +723,7 @@ pub trait Flow: Send + Sync {
                 *last = std::time::Instant::now();
             }
 
-            ::log::info!( "posting message: {:?}", m);
+            ::log::info!("flow posting message: rel_path: \"{}\" {:?}", m.rel_path, m);
             let mut failed_indices = Vec::new();
             for (idx, pub_mutex) in publishers.iter().enumerate() {
                 // Clone the message for each publisher to avoid cross-contamination of modifications
